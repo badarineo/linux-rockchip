@@ -67,6 +67,25 @@ static const struct v4l2_dv_timings_cap tc358743_timings_cap = {
 			V4L2_DV_BT_CAP_CUSTOM)
 };
 
+static u8 EDID_1920x1080_60[] = {
+	0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00,
+	0x52, 0x62, 0x88, 0x88, 0x00, 0x88, 0x88, 0x88,
+	0x1C, 0x15, 0x01, 0x03, 0x80, 0x00, 0x00, 0x78,
+	0x0A, 0x0D, 0xC9, 0xA0, 0x57, 0x47, 0x98, 0x27,
+	0x12, 0x48, 0x4C, 0x00, 0x00, 0x00, 0x01, 0x01,
+	0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+	0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x02, 0x3A,
+	0x80, 0x18, 0x71, 0x38, 0x2D, 0x40, 0x58, 0x2C,
+	0x45, 0x00, 0xC4, 0x8E, 0x21, 0x00, 0x00, 0x1E,
+	0x01, 0x1D, 0x00, 0x72, 0x51, 0xD0, 0x1E, 0x20,
+	0x6E, 0x28, 0x55, 0x00, 0xC4, 0x8E, 0x21, 0x00,
+	0x00, 0x1E, 0x00, 0x00, 0x00, 0xFC, 0x00, 0x54,
+	0x6F, 0x73, 0x68, 0x69, 0x62, 0x61, 0x2D, 0x48,
+	0x32, 0x44, 0x0A, 0x20, 0x00, 0x00, 0x00, 0xFD,
+	0x00, 0x17, 0x3D, 0x0F, 0x8C, 0x17, 0x00, 0x0A,
+	0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x01, 0x92,
+};
+
 struct tc358743_state {
 	struct tc358743_platform_data pdata;
 	struct v4l2_fwnode_bus_mipi_csi2 bus;
@@ -102,6 +121,8 @@ struct tc358743_state {
 static void tc358743_enable_interrupts(struct v4l2_subdev *sd,
 		bool cable_connected);
 static int tc358743_s_ctrl_detect_tx_5v(struct v4l2_subdev *sd);
+static int tc358743_s_dv_timings(struct v4l2_subdev *sd,
+				 struct v4l2_dv_timings *timings);
 
 static inline struct tc358743_state *to_state(struct v4l2_subdev *sd)
 {
@@ -993,13 +1014,15 @@ static void tc358743_format_change(struct v4l2_subdev *sd)
 		v4l2_dbg(1, debug, sd, "%s: No signal\n",
 				__func__);
 	} else {
-		if (!v4l2_match_dv_timings(&state->timings, &timings, 0, false))
+		if (!v4l2_match_dv_timings(&state->timings, &timings, 0, false)) {
 			enable_stream(sd, false);
+			/* automaticly set timing rather than set by userspace */
+			tc358743_s_dv_timings(sd, &timings);
+		}
 
-		if (debug)
-			v4l2_print_dv_timings(sd->name,
-					"tc358743_format_change: New format: ",
-					&timings, false);
+		v4l2_print_dv_timings(sd->name,
+				"tc358743_format_change: New format: ",
+				&timings, false);
 	}
 
 	if (sd->devnode)
@@ -1635,10 +1658,6 @@ static int tc358743_g_mbus_config(struct v4l2_subdev *sd,
 static int tc358743_s_stream(struct v4l2_subdev *sd, int enable)
 {
 	enable_stream(sd, enable);
-	if (!enable) {
-		/* Put all lanes in LP-11 state (STOPSTATE) */
-		tc358743_set_csi(sd);
-	}
 
 	return 0;
 }
@@ -1668,9 +1687,6 @@ static int tc358743_get_fmt(struct v4l2_subdev *sd,
 {
 	struct tc358743_state *state = to_state(sd);
 	u8 vi_rep = i2c_rd8(sd, VI_REP);
-
-	if (format->pad != 0)
-		return -EINVAL;
 
 	format->format.code = state->mbus_fmt_code;
 	format->format.width = state->timings.bt.width;
@@ -2034,6 +2050,7 @@ static int tc358743_probe(struct i2c_client *client,
 	struct tc358743_state *state;
 	struct tc358743_platform_data *pdata = client->dev.platform_data;
 	struct v4l2_subdev *sd;
+	struct v4l2_subdev_edid def_edid;
 	u16 irq_mask = MASK_HDMI_MSK | MASK_CSI_MSK;
 	int err, data;
 
@@ -2107,7 +2124,7 @@ static int tc358743_probe(struct i2c_client *client,
 	if (err < 0)
 		goto err_hdl;
 
-	state->mbus_fmt_code = MEDIA_BUS_FMT_RGB888_1X24;
+	state->mbus_fmt_code = MEDIA_BUS_FMT_UYVY8_1X16;
 
 	sd->dev = &client->dev;
 	err = v4l2_async_register_subdev(sd);
@@ -2135,6 +2152,13 @@ static int tc358743_probe(struct i2c_client *client,
 	tc358743_s_dv_timings(sd, &default_timing);
 
 	tc358743_set_csi_color_space(sd);
+
+	def_edid.pad = 0;
+	def_edid.start_block = 0;
+	def_edid.blocks = 1;
+	def_edid.edid = EDID_1920x1080_60;
+
+	tc358743_s_edid(sd, &def_edid);
 
 	tc358743_init_interrupts(sd);
 
