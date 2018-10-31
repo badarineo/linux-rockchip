@@ -144,7 +144,7 @@ static int submit_lookup_objects(struct msm_gem_submit *submit,
 			goto out_unlock;
 		}
 
-		drm_gem_object_reference(obj);
+		drm_gem_object_get(obj);
 
 		submit->bos[i].obj = msm_obj;
 
@@ -241,7 +241,8 @@ static int submit_fence_sync(struct msm_gem_submit *submit, bool no_implicit)
 			 * strange place to call it.  OTOH this is a
 			 * convenient can-fail point to hook it in.
 			 */
-			ret = reservation_object_reserve_shared(msm_obj->resv);
+			ret = reservation_object_reserve_shared(msm_obj->resv,
+								1);
 			if (ret)
 				return ret;
 		}
@@ -396,7 +397,7 @@ static void submit_cleanup(struct msm_gem_submit *submit)
 		struct msm_gem_object *msm_obj = submit->bos[i].obj;
 		submit_unlock_unpin_bo(submit, i, false);
 		list_del_init(&msm_obj->submit_entry);
-		drm_gem_object_unreference(&msm_obj->base);
+		drm_gem_object_put(&msm_obj->base);
 	}
 
 	ww_acquire_fini(&submit->ticket);
@@ -429,6 +430,12 @@ int msm_ioctl_gem_submit(struct drm_device *dev, void *data,
 
 	if (MSM_PIPE_FLAGS(args->flags) & ~MSM_SUBMIT_FLAGS)
 		return -EINVAL;
+
+	if (args->flags & MSM_SUBMIT_SUDO) {
+		if (!IS_ENABLED(CONFIG_DRM_MSM_GPU_SUDO) ||
+		    !capable(CAP_SYS_RAWIO))
+			return -EINVAL;
+	}
 
 	queue = msm_submitqueue_get(ctx, args->queueid);
 	if (!queue)
@@ -470,6 +477,9 @@ int msm_ioctl_gem_submit(struct drm_device *dev, void *data,
 		ret = -ENOMEM;
 		goto out_unlock;
 	}
+
+	if (args->flags & MSM_SUBMIT_SUDO)
+		submit->in_rb = true;
 
 	ret = submit_lookup_objects(submit, args, file);
 	if (ret)

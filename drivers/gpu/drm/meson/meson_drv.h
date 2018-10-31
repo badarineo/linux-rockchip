@@ -33,7 +33,6 @@ struct meson_drm {
 
 	struct drm_device *drm;
 	struct drm_crtc *crtc;
-	struct drm_fbdev_cma *fbdev;
 	struct drm_plane *primary_plane;
 
 	/* Components Data */
@@ -43,6 +42,9 @@ struct meson_drm {
 		bool osd1_commit;
 		uint32_t osd1_ctrl_stat;
 		uint32_t osd1_blk0_cfg[5];
+		uint32_t osd1_addr;
+		uint32_t osd1_stride;
+		uint32_t osd1_height;
 	} viu;
 
 	struct {

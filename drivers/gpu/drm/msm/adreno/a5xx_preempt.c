@@ -82,9 +82,9 @@ static struct msm_ringbuffer *get_next_ring(struct msm_gpu *gpu)
 	return NULL;
 }
 
-static void a5xx_preempt_timer(unsigned long data)
+static void a5xx_preempt_timer(struct timer_list *t)
 {
-	struct a5xx_gpu *a5xx_gpu = (struct a5xx_gpu *) data;
+	struct a5xx_gpu *a5xx_gpu = from_timer(a5xx_gpu, t, preempt_timer);
 	struct msm_gpu *gpu = &a5xx_gpu->base.base;
 	struct drm_device *dev = gpu->dev;
 	struct msm_drm_private *priv = dev->dev_private;
@@ -208,6 +208,13 @@ void a5xx_preempt_hw_init(struct msm_gpu *gpu)
 	struct a5xx_gpu *a5xx_gpu = to_a5xx_gpu(adreno_gpu);
 	int i;
 
+	/* Always come up on rb 0 */
+	a5xx_gpu->cur_ring = gpu->rb[0];
+
+	/* No preemption if we only have one ring */
+	if (gpu->nr_rings == 1)
+		return;
+
 	for (i = 0; i < gpu->nr_rings; i++) {
 		a5xx_gpu->preempt[i]->wptr = 0;
 		a5xx_gpu->preempt[i]->rptr = 0;
@@ -220,9 +227,6 @@ void a5xx_preempt_hw_init(struct msm_gpu *gpu)
 
 	/* Reset the preemption state */
 	set_preempt_state(a5xx_gpu, PREEMPT_NONE);
-
-	/* Always come up on rb 0 */
-	a5xx_gpu->cur_ring = gpu->rb[0];
 }
 
 static int preempt_init_ring(struct a5xx_gpu *a5xx_gpu,
@@ -272,7 +276,7 @@ void a5xx_preempt_fini(struct msm_gpu *gpu)
 		if (a5xx_gpu->preempt_iova[i])
 			msm_gem_put_iova(a5xx_gpu->preempt_bo[i], gpu->aspace);
 
-		drm_gem_object_unreference(a5xx_gpu->preempt_bo[i]);
+		drm_gem_object_put(a5xx_gpu->preempt_bo[i]);
 		a5xx_gpu->preempt_bo[i] = NULL;
 	}
 }
@@ -300,6 +304,5 @@ void a5xx_preempt_init(struct msm_gpu *gpu)
 		}
 	}
 
-	setup_timer(&a5xx_gpu->preempt_timer, a5xx_preempt_timer,
-		(unsigned long) a5xx_gpu);
+	timer_setup(&a5xx_gpu->preempt_timer, a5xx_preempt_timer, 0);
 }

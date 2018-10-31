@@ -134,6 +134,7 @@ static int arcpgu_unload(struct drm_device *drm)
 		arcpgu->fbdev = NULL;
 	}
 	drm_kms_helper_poll_fini(drm);
+	drm_atomic_helper_shutdown(drm);
 	drm_mode_config_cleanup(drm);
 
 	return 0;
@@ -155,7 +156,6 @@ static int arcpgu_show_pxlclock(struct seq_file *m, void *arg)
 
 static struct drm_info_list arcpgu_debugfs_list[] = {
 	{ "clocks", arcpgu_show_pxlclock, 0 },
-	{ "fb", drm_fb_cma_debugfs_show, 0 },
 };
 
 static int arcpgu_debugfs_init(struct drm_minor *minor)
@@ -180,6 +180,7 @@ static struct drm_driver arcpgu_drm_driver = {
 	.prime_handle_to_fd = drm_gem_prime_handle_to_fd,
 	.prime_fd_to_handle = drm_gem_prime_fd_to_handle,
 	.gem_free_object_unlocked = drm_gem_cma_free_object,
+	.gem_print_info = drm_gem_cma_print_info,
 	.gem_vm_ops = &drm_gem_cma_vm_ops,
 	.gem_prime_export = drm_gem_prime_export,
 	.gem_prime_import = drm_gem_prime_import,
