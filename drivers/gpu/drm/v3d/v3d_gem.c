@@ -521,6 +521,8 @@ v3d_submit_cl_ioctl(struct drm_device *dev, void *data,
 	struct drm_syncobj *sync_out;
 	int ret = 0;
 
+	trace_v3d_submit_cl_ioctl(&v3d->drm, args->rcl_start, args->rcl_end);
+
 	if (args->pad != 0) {
 		DRM_INFO("pad must be zero: %d\n", args->pad);
 		return -EINVAL;
@@ -607,8 +609,7 @@ v3d_submit_cl_ioctl(struct drm_device *dev, void *data,
 	/* Update the return sync object for the */
 	sync_out = drm_syncobj_find(file_priv, args->out_sync);
 	if (sync_out) {
-		drm_syncobj_replace_fence(sync_out, 0,
-					  exec->render_done_fence);
+		drm_syncobj_replace_fence(sync_out, exec->render_done_fence);
 		drm_syncobj_put(sync_out);
 	}
 
@@ -647,6 +648,8 @@ v3d_submit_tfu_ioctl(struct drm_device *dev, void *data,
 	struct dma_fence *sched_done_fence;
 	int ret = 0;
 	int bo_count;
+
+	trace_v3d_submit_tfu_ioctl(&v3d->drm, args->iia);
 
 	job = kcalloc(1, sizeof(*job), GFP_KERNEL);
 	if (!job)
