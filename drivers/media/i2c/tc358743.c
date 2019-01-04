@@ -1667,6 +1667,9 @@ static int tc358743_s_stream(struct v4l2_subdev *sd, int enable)
 {
 	enable_stream(sd, enable);
 
+	/* stop stream to reset csi*/
+	if (!enable)
+		tc358743_set_csi(sd);
 	return 0;
 }
 
