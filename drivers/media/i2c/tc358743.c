@@ -54,10 +54,11 @@ MODULE_LICENSE("GPL");
 #define POLL_INTERVAL_CEC_MS	10
 #define POLL_INTERVAL_MS	1000
 
-#define tc358743_LINK_FREQ_300MHZ	300000000
-#define tc358743_PIXEL_RATE		(tc358743_LINK_FREQ_300MHZ * 2 * 2 / 8)
+/* PIXEL_RATE = MIPI_FREQ * 2 * lane / 8bit */
+#define tc358743_LINK_FREQ_310MHZ	310000000
+#define tc358743_PIXEL_RATE		tc358743_LINK_FREQ_310MHZ
 static const s64 link_freq_menu_items[] = {
-	tc358743_LINK_FREQ_300MHZ,
+	tc358743_LINK_FREQ_310MHZ,
 };
 
 static const struct v4l2_dv_timings_cap tc358743_timings_cap = {
