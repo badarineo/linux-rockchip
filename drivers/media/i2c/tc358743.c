@@ -390,7 +390,7 @@ static void tc358743_delayed_work_enable_hotplug(struct work_struct *work)
 
 	v4l2_dbg(2, debug, sd, "%s:\n", __func__);
 
-	i2c_wr8_and_or(sd, HPD_CTL, ~MASK_HPD_OUT0, MASK_HPD_OUT0);
+	i2c_wr8_and_or(sd, HPD_CTL, ~(u8)MASK_HPD_OUT0, MASK_HPD_OUT0);
 }
 
 static void tc358743_set_hdmi_hdcp(struct v4l2_subdev *sd, bool enable)
@@ -399,18 +399,18 @@ static void tc358743_set_hdmi_hdcp(struct v4l2_subdev *sd, bool enable)
 				"enable" : "disable");
 
 	if (enable) {
-		i2c_wr8_and_or(sd, HDCP_REG3, ~KEY_RD_CMD, KEY_RD_CMD);
+		i2c_wr8_and_or(sd, HDCP_REG3, ~(u8)KEY_RD_CMD, KEY_RD_CMD);
 
-		i2c_wr8_and_or(sd, HDCP_MODE, ~MASK_MANUAL_AUTHENTICATION, 0);
+		i2c_wr8_and_or(sd, HDCP_MODE, ~(u8)MASK_MANUAL_AUTHENTICATION, 0);
 
 		i2c_wr8_and_or(sd, HDCP_REG1, 0xff,
 				MASK_AUTH_UNAUTH_SEL_16_FRAMES |
 				MASK_AUTH_UNAUTH_AUTO);
 
-		i2c_wr8_and_or(sd, HDCP_REG2, ~MASK_AUTO_P3_RESET,
+		i2c_wr8_and_or(sd, HDCP_REG2, ~(u8)MASK_AUTO_P3_RESET,
 				SET_AUTO_P3_RESET_FRAMES(0x0f));
 	} else {
-		i2c_wr8_and_or(sd, HDCP_MODE, ~MASK_MANUAL_AUTHENTICATION,
+		i2c_wr8_and_or(sd, HDCP_MODE, ~(u8)MASK_MANUAL_AUTHENTICATION,
 				MASK_MANUAL_AUTHENTICATION);
 	}
 }
@@ -425,7 +425,7 @@ static void tc358743_disable_edid(struct v4l2_subdev *sd)
 
 	/* DDC access to EDID is also disabled when hotplug is disabled. See
 	 * register DDC_CTL */
-	i2c_wr8_and_or(sd, HPD_CTL, ~MASK_HPD_OUT0, 0x0);
+	i2c_wr8_and_or(sd, HPD_CTL, ~(u8)MASK_HPD_OUT0, 0x0);
 }
 
 static void tc358743_enable_edid(struct v4l2_subdev *sd)
@@ -523,8 +523,8 @@ static void tc358743_reset_phy(struct v4l2_subdev *sd)
 {
 	v4l2_dbg(1, debug, sd, "%s:\n", __func__);
 
-	i2c_wr8_and_or(sd, PHY_RST, ~MASK_RESET_CTRL, 0);
-	i2c_wr8_and_or(sd, PHY_RST, ~MASK_RESET_CTRL, MASK_RESET_CTRL);
+	i2c_wr8_and_or(sd, PHY_RST, ~(u8)MASK_RESET_CTRL, 0);
+	i2c_wr8_and_or(sd, PHY_RST, ~(u8)MASK_RESET_CTRL, MASK_RESET_CTRL);
 }
 
 static void tc358743_reset(struct v4l2_subdev *sd, uint16_t mask)
@@ -537,7 +537,7 @@ static void tc358743_reset(struct v4l2_subdev *sd, uint16_t mask)
 
 static inline void tc358743_sleep_mode(struct v4l2_subdev *sd, bool enable)
 {
-	i2c_wr16_and_or(sd, SYSCTL, ~MASK_SLEEP,
+	i2c_wr16_and_or(sd, SYSCTL, ~(u16)MASK_SLEEP,
 			enable ? MASK_SLEEP : 0);
 }
 
@@ -566,7 +566,7 @@ static inline void enable_stream(struct v4l2_subdev *sd, bool enable)
 	}
 
 	mutex_lock(&state->confctl_mutex);
-	i2c_wr16_and_or(sd, CONFCTL, ~(MASK_VBUFEN | MASK_ABUFEN),
+	i2c_wr16_and_or(sd, CONFCTL, ~(u16)(MASK_VBUFEN | MASK_ABUFEN),
 			enable ? (MASK_VBUFEN | MASK_ABUFEN) : 0x0);
 	mutex_unlock(&state->confctl_mutex);
 }
@@ -601,11 +601,12 @@ static void tc358743_set_pll(struct v4l2_subdev *sd)
 		tc358743_sleep_mode(sd, true);
 		i2c_wr16(sd, PLLCTL0, pllctl0_new);
 		i2c_wr16_and_or(sd, PLLCTL1,
-				~(MASK_PLL_FRS | MASK_RESETB | MASK_PLL_EN),
+				~(u16)(MASK_PLL_FRS | MASK_RESETB |
+				       MASK_PLL_EN),
 				(SET_PLL_FRS(pll_frs) | MASK_RESETB |
 				 MASK_PLL_EN));
 		udelay(10); /* REF_02, Sheet "Source HDMI" */
-		i2c_wr16_and_or(sd, PLLCTL1, ~MASK_CKEN, MASK_CKEN);
+		i2c_wr16_and_or(sd, PLLCTL1, ~(u16)MASK_CKEN, MASK_CKEN);
 		tc358743_sleep_mode(sd, false);
 	}
 }
@@ -628,7 +629,7 @@ static void tc358743_set_ref_clk(struct v4l2_subdev *sd)
 	i2c_wr8(sd, SYS_FREQ0, sys_freq & 0x00ff);
 	i2c_wr8(sd, SYS_FREQ1, (sys_freq & 0xff00) >> 8);
 
-	i2c_wr8_and_or(sd, PHY_CTL0, ~MASK_PHY_SYSCLK_IND,
+	i2c_wr8_and_or(sd, PHY_CTL0, ~(u8)MASK_PHY_SYSCLK_IND,
 			(pdata->refclk_hz == 42000000) ?
 			MASK_PHY_SYSCLK_IND : 0x0);
 
@@ -759,14 +760,14 @@ static void tc358743_set_csi(struct v4l2_subdev *sd)
 			 (lanes == 3) ? MASK_NOL_3 :
 			 (lanes == 2) ? MASK_NOL_2 : MASK_NOL_1));
 
-	i2c_wr32(sd, CSI_CONFW, MASK_MODE_SET |
+	i2c_wr32(sd, CSI_CONFW, (u32)MASK_MODE_SET |
 			MASK_ADDRESS_CSI_ERR_INTENA | MASK_TXBRK | MASK_QUNK |
 			MASK_WCER | MASK_INER);
 
-	i2c_wr32(sd, CSI_CONFW, MASK_MODE_CLEAR |
+	i2c_wr32(sd, CSI_CONFW, (u32)MASK_MODE_CLEAR |
 			MASK_ADDRESS_CSI_ERR_HALT | MASK_TXBRK | MASK_QUNK);
 
-	i2c_wr32(sd, CSI_CONFW, MASK_MODE_SET |
+	i2c_wr32(sd, CSI_CONFW, (u32)MASK_MODE_SET | 
 			MASK_ADDRESS_CSI_INT_ENA | MASK_INTER);
 }
 
@@ -777,7 +778,7 @@ static void tc358743_set_hdmi_phy(struct v4l2_subdev *sd)
 
 	/* Default settings from REF_02, sheet "Source HDMI"
 	 * and custom settings as platform data */
-	i2c_wr8_and_or(sd, PHY_EN, ~MASK_ENABLE_PHY, 0x0);
+	i2c_wr8_and_or(sd, PHY_EN, ~(u8)MASK_ENABLE_PHY, 0x0);
 	i2c_wr8(sd, PHY_CTL1, SET_PHY_AUTO_RST1_US(1600) |
 			SET_FREQ_RANGE_MODE_CYCLES(1));
 	i2c_wr8_and_or(sd, PHY_CTL2, ~MASK_PHY_AUTO_RSTn,
@@ -797,7 +798,7 @@ static void tc358743_set_hdmi_phy(struct v4l2_subdev *sd)
 			 MASK_H_PI_RST : 0) |
 			(pdata->hdmi_phy_auto_reset_vsync_out_of_range ?
 			 MASK_V_PI_RST : 0));
-	i2c_wr8_and_or(sd, PHY_EN, ~MASK_ENABLE_PHY, MASK_ENABLE_PHY);
+	i2c_wr8_and_or(sd, PHY_EN, ~(u8)MASK_ENABLE_PHY, MASK_ENABLE_PHY);
 }
 
 static void tc358743_set_hdmi_audio(struct v4l2_subdev *sd)
@@ -849,7 +850,7 @@ static void tc358743_initial_setup(struct v4l2_subdev *sd)
 	 * IR is not supported by this driver.
 	 * CEC is only enabled if needed.
 	 */
-	i2c_wr16_and_or(sd, SYSCTL, ~(MASK_IRRST | MASK_CECRST),
+	i2c_wr16_and_or(sd, SYSCTL, ~(u16)(MASK_IRRST | MASK_CECRST),
 				     (MASK_IRRST | MASK_CECRST));
 
 	tc358743_reset(sd, MASK_CTXRST | MASK_HDMIRST);
@@ -872,7 +873,7 @@ static void tc358743_initial_setup(struct v4l2_subdev *sd)
 	tc358743_set_hdmi_info_frame_mode(sd);
 
 	/* All CE and IT formats are detected as RGB full range in DVI mode */
-	i2c_wr8_and_or(sd, VI_MODE, ~MASK_RGB_DVI, 0);
+	i2c_wr8_and_or(sd, VI_MODE, ~(u8)MASK_RGB_DVI, 0);
 
 	i2c_wr8_and_or(sd, VOUT_SET2, ~MASK_VOUTCOLORMODE,
 			MASK_VOUTCOLORMODE_AUTO);
@@ -1058,11 +1059,11 @@ static void tc358743_enable_interrupts(struct v4l2_subdev *sd,
 	if (cable_connected) {
 		i2c_wr8(sd, SYS_INTM, ~(MASK_M_DDC | MASK_M_DVI_DET |
 					MASK_M_HDMI_DET) & 0xff);
-		i2c_wr8(sd, CLK_INTM, ~MASK_M_IN_DE_CHG);
+		i2c_wr8(sd, CLK_INTM, ~(u8)MASK_M_IN_DE_CHG);
 		i2c_wr8(sd, CBIT_INTM, ~(MASK_M_CBIT_FS | MASK_M_AF_LOCK |
 					MASK_M_AF_UNLOCK) & 0xff);
-		i2c_wr8(sd, AUDIO_INTM, ~MASK_M_BUFINIT_END);
-		i2c_wr8(sd, MISC_INTM, ~MASK_M_SYNC_CHG);
+		i2c_wr8(sd, AUDIO_INTM, ~(u8)MASK_M_BUFINIT_END);
+		i2c_wr8(sd, MISC_INTM, ~(u8)MASK_M_SYNC_CHG);
 	} else {
 		i2c_wr8(sd, SYS_INTM, ~MASK_M_DDC & 0xff);
 		i2c_wr8(sd, CLK_INTM, 0xff);
