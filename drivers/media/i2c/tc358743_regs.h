@@ -21,14 +21,19 @@
 #define MASK_REVID				0x00ff
 
 #define SYSCTL					0x0002
+#define MASK_ABRST				BIT(14) /* tc358749 */
+#define MASK_SLMBRST				BIT(13) /* tc358749 */
+#define MASK_VIPRST				BIT(12) /* tc358749 */
 #define MASK_IRRST				BIT(11)
 #define MASK_CECRST				BIT(10)
 #define MASK_CTXRST				BIT(9)
 #define MASK_HDMIRST				BIT(8)
+#define MASK_I2SDIS				BIT(7) /* tc358749 */
 #define MASK_SLEEP				BIT(0)
 
 #define CONFCTL					0x0004
 #define MASK_PWRISO				BIT(15)
+#define MASK_SLMBEN				BIT(14)
 #define MASK_ACLKOPT				BIT(12)
 #define MASK_AUDCHNUM				(0x3 << 10)
 #define MASK_AUDCHNUM_8				(0x0 << 10)
@@ -42,7 +47,7 @@
 #define MASK_YCBCRFMT_422_12_BIT		(0x1 << 6)
 #define MASK_YCBCRFMT_COLORBAR			(0x2 << 6)
 #define MASK_YCBCRFMT_422_8_BIT			(0x3 << 6)
-#define MASK_INFRMEN				BIT(5)
+#define MASK_INFRMEN				BIT(5) /* not tc358749 */
 #define MASK_AUDOUTSEL				(0x3 << 3)
 #define MASK_AUDOUTSEL_CSI			(0x0 << 3)
 #define MASK_AUDOUTSEL_I2S			(0x2 << 3)
@@ -57,6 +62,7 @@
 #define MASK_AMUTE_INT				BIT(10)
 #define MASK_HDMI_INT				BIT(9)
 #define MASK_CSI_INT				BIT(8)
+#define MASK_SLMB_INT				BIT(7) /* tc358749 */
 #define MASK_SYS_INT				BIT(5)
 #define MASK_CEC_EINT				BIT(4)
 #define MASK_CEC_TINT				BIT(3)
@@ -68,6 +74,7 @@
 #define MASK_AMUTE_MSK				BIT(10)
 #define MASK_HDMI_MSK				BIT(9)
 #define MASK_CSI_MSK				BIT(8)
+#define MASK_SLMB_MSK				BIT(7) /* tc358749 */
 #define MASK_SYS_MSK				BIT(5)
 #define MASK_CEC_EMSK				BIT(4)
 #define MASK_CEC_TMSK				BIT(3)
@@ -79,10 +86,10 @@
 #define INTSYSSTATUS				0x001A
 
 #define PLLCTL0					0x0020
-#define MASK_PLL_PRD				0xf000
+#define MASK_PLL_PRD				(0xf << 12)
 #define SET_PLL_PRD(prd)			((((prd) - 1) << 12) & \
 							MASK_PLL_PRD)
-#define MASK_PLL_FBD				0x01ff
+#define MASK_PLL_FBD				(0x1ff << 0)
 #define SET_PLL_FBD(fbd)			(((fbd) - 1) & MASK_PLL_FBD)
 
 #define PLLCTL1					0x0022
@@ -136,8 +143,14 @@
 
 #define CSI_CONTROL				0x040C
 #define MASK_CSI_MODE				BIT(15)
+#define MASK_PRTOEN				BIT(13) /* tc358749 */
+#define MASK_TATOEN				BIT(12) /* tc358749 */
+#define MASK_LRXTOEN				BIT(11) /* tc358749 */
 #define MASK_HTXTOEN				BIT(10)
+#define MASK_CNTDIS				BIT(9) /* tc358749 */
+#define MASK_ECCDIS				BIT(8) /* tc358749 */
 #define MASK_TXHSMD				BIT(7)
+#define MASK_CRCDIS				BIT(6) /* tc358749 */
 #define MASK_HSCKMD				BIT(5)
 #define MASK_NOL				(0x3 << 1)
 #define MASK_NOL_1				(0x0 << 1)
@@ -147,18 +160,30 @@
 #define MASK_EOTDIS				BIT(0)
 
 #define CSI_INT					0x0414
+#define MASK_INTAK				BIT(18) /* tc358749 */
 #define MASK_INTHLT				BIT(3)
 #define MASK_INTER				BIT(2)
+#define MASK_INTRXER				BIT(1) /* tc358749 */
+#define MASK_INTAKER				BIT(0) /* tc358749 */
 
 #define CSI_INT_ENA				0x0418
+#define MASK_IENAK				BIT(18) /* tc358749 */
 #define MASK_IENHLT				BIT(3)
 #define MASK_IENER				BIT(2)
+#define MASK_IENRXER				BIT(1) /* tc358749 */
+#define MASK_IENAKER				BIT(0) /* tc358749 */
 
 #define CSI_ERR					0x044C
 #define MASK_INER				BIT(9)
 #define MASK_WCER				BIT(8)
+#define MASK_SYNTO				BIT(7) /* tc358749 */
+#define MASK_RXFRDER				BIT(6) /* tc358749 */
+#define MASK_TEER				BIT(5) /* tc358749 */
 #define MASK_QUNK				BIT(4)
+#define MASK_QWRER				BIT(3) /* tc358749 */
+#define MASK_HTXTO				BIT(2) /* tc358749 */
 #define MASK_TXBRK				BIT(1)
+#define MASK_CNTN				BIT(0) /* tc358749 */
 
 #define CSI_ERR_INTENA				0x0450
 #define CSI_ERR_HALT				0x0454
@@ -175,7 +200,11 @@
 #define MASK_DATA				(0xffff << 0)
 
 #define CSI_INT_CLR				0x050C
+#define MASK_ICRAK				BIT(18) /* tc358749 */
+#define MASK_ICRHLT				BIT(3) /* tc358749 */
 #define MASK_ICRER				BIT(2)
+#define MASK_ICRXER				BIT(1) /* tc358749 */
+#define MASK_ICAKER				BIT(0) /* tc358749 */
 
 #define CSI_START				0x0518
 #define MASK_STRT				BIT(0)
@@ -310,12 +339,24 @@
 #define CBIT_INT				0x8505
 #define MASK_I_AF_LOCK				BIT(7)
 #define MASK_I_AF_UNLOCK			BIT(6)
+#define MASK_I_AU_DST				BIT(5) /* tc358749 */
+#define MASK_I_AU_DSD				BIT(4) /* tc358749 */
+#define MASK_I_AU_HBR				BIT(3) /* tc358749 */
+#define MASK_I_CBIT_NLPCM			BIT(2) /* tc358749 */
 #define MASK_I_CBIT_FS				BIT(1)
+#define MASK_I_CBIT				BIT(0) /* tc358749 */
 
 #define AUDIO_INT				0x8506
 
 #define ERR_INT					0x8507
 #define MASK_I_EESS_ERR				BIT(7)
+#define MASK_I_AU_FRAME				BIT(6) /* tc358749 */
+#define MASK_I_NO_ACP				BIT(5) /* tc358749 */
+#define MASK_I_NO_AVI				BIT(4) /* tc358749 */
+#define MASK_I_DC_NOCD				BIT(3) /* tc358749 */
+#define MASK_I_DC_DEERR				BIT(2) /* tc358749 */
+#define MASK_I_DC_BUFERR			BIT(1) /* tc358749 */
+#define MASK_I_DC_PPERR				BIT(0) /* tc358749 */
 
 #define HDCP_INT				0x8508
 #define MASK_I_AVM_SET				BIT(7)
@@ -360,13 +401,32 @@
 #define CBIT_INTM				0x8515
 #define MASK_M_AF_LOCK				BIT(7)
 #define MASK_M_AF_UNLOCK			BIT(6)
+#define MASK_M_AU_DST				BIT(5) /* tc358749 */
+#define MASK_M_AU_DSD				BIT(4) /* tc358749 */
+#define MASK_M_AU_HBR				BIT(3) /* tc358749 */
+#define MASK_M_CBIT_NLPCM			BIT(2) /* tc358749 */
 #define MASK_M_CBIT_FS				BIT(1)
+#define MASK_M_CBIT				BIT(0) /* tc358749 */
 
 #define AUDIO_INTM				0x8516
+#define MASK_M_BUF_OVER				BIT(7) /* tc358749 */
+#define MASK_M_BUF_NO2				BIT(6) /* tc358749 */
+#define MASK_M_BUF_NO1				BIT(5) /* tc358749 */
+#define MASK_M_BUF_CENTER			BIT(4) /* tc358749 */
+#define MASK_M_BUF_NU1				BIT(3) /* tc358749 */
+#define MASK_M_BUF_NU2				BIT(2) /* tc358749 */
+#define MASK_M_BUF_UNDER			BIT(1) /* tc358749 */
 #define MASK_M_BUFINIT_END			BIT(0)
 
 #define ERR_INTM				0x8517
 #define MASK_M_EESS_ERR				BIT(7)
+#define MASK_M_AU_FRAME				BIT(6) /* tc358749 */
+#define MASK_M_NO_ACP				BIT(5) /* tc358749 */
+#define MASK_M_NO_AVI				BIT(4) /* tc358749 */
+#define MASK_M_DC_NOCD				BIT(3) /* tc358749 */
+#define MASK_M_DC_DEERR				BIT(2) /* tc358749 */
+#define MASK_M_DC_BUFERR			BIT(1) /* tc358749 */
+#define MASK_M_DC_PPERR				BIT(0) /* tc358749 */
 
 #define HDCP_INTM				0x8518
 #define MASK_M_AVM_SET				BIT(7)
@@ -401,6 +461,9 @@
 #define MASK_S_WSYNC				BIT(10)
 #define MASK_S_TXACT				BIT(9)
 #define MASK_S_RXACT				BIT(8)
+#define MASK_S_RXAF				BIT(7) /* tc358749 */
+#define MASK_S_RXAE				BIT(6) /* tc358749 */
+#define MASK_S_RXEM				BIT(5) /* tc358749 */
 #define MASK_S_HLT				BIT(0)
 
 #define VI_STATUS1				0x8522
@@ -410,6 +473,11 @@
 #define MASK_S_V_INTERLACE			BIT(0)
 
 #define AU_STATUS0				0x8523
+#define MASK_S_A_MUTE				BIT(7) /* tc358749 */
+#define MASK_S_A_DST				BIT(4) /* tc358749 */
+#define MASK_S_A_DSD				BIT(3) /* tc358749 */
+#define MASK_S_A_HBR				BIT(2) /* tc358749 */
+#define MASK_S_A_NLPCM				BIT(1) /* tc358749 */
 #define MASK_S_A_SAMPLE				BIT(0)
 
 #define VI_STATUS3				0x8528
@@ -518,6 +586,7 @@
 #define MASK_AUTO_P3_RESET_OFF			0x00
 
 #define VI_MODE					0x8570
+#define MASK_SG_ON				BIT(4) /* tc358749 */
 #define MASK_RGB_DVI				BIT(3) /* Not in REF_01 */
 
 #define VOUT_SET2				0x8573
@@ -530,6 +599,12 @@
 #define MASK_VOUTCOLORMODE_MANUAL		(0x03 << 0)
 
 #define VOUT_SET3				0x8574
+#define MASK_VOUT_LIM				BIT(7) /* tc358749 */
+#define MASK_VOUT_BIT				(0x3 << 4) /* tc358749 */
+#define MASK_VOUT_BIT_16			(0x0 << 4) /* tc358749 */
+#define MASK_VOUT_BIT_12			(0x1 << 4) /* tc358749 */
+#define MASK_VOUT_BIT_10			(0x2 << 4) /* tc358749 */
+#define MASK_VOUT_BIT_8				(0x3 << 4) /* tc358749 */
 #define MASK_VOUT_EXTCNT			BIT(3)
 
 #define VI_REP					0x8576
@@ -633,6 +708,8 @@
 #define MASK_FS_IMODE				BIT(0)
 
 #define FS_SET					0x8621
+#define MASK_DTS_DOUBLE				BIT(7) /* tc358749 */
+#define MASK_NLPCM				BIT(4) /* tc358749 */
 #define MASK_FS					(0xf << 0)
 
 #define LOCKDET_REF0				0x8630
@@ -677,6 +754,8 @@
 
 #define SDO_MODE1				0x8652
 #define MASK_SDO_BIT_LENG			(0x7 << 4)
+#define MASK_I2s_HBR4L_MODE			BIT(3) /* tc358749 */
+#define MASK_I2S_MODE				BIT(2) /* tc358749 */
 #define MASK_SDO_FMT				(0x3 << 0)
 #define MASK_SDO_FMT_RIGHT			(0x0 << 0)
 #define MASK_SDO_FMT_LEFT			(0x1 << 0)
@@ -752,7 +831,10 @@
 #define MASK_FAST_REAU				BIT(0)
 
 #define BSTATUS1				0x8842
+#define MASK_HDMI_RSVD				BIT(5) /* tc358749 */
+#define MASK_HDMI_MODE				BIT(4) /* tc358749 */
 #define MASK_MAX_EXCED				BIT(3)
+#define MASK_DEPTH				(0x7 << 0) /* tc358749 */
 
 #define EDID_RAM				0x8C00
 #define NO_GDB_LIMIT				0x9007
