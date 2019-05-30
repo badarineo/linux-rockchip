@@ -111,9 +111,148 @@
 	status = "okay";
 };
 
+
+/ {
+	vcc1v2_dragonfish: vcc1v2-dragonfish {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc1v2-dragonfish";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <1200000>;
+		regulator-max-microvolt = <1200000>;
+		vin-supply = <&vcc3v3_baseboard>;
+	};
+
+	vcc1v8_dragonfish: vcc1v8-dragonfish {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc1v8-dragonfish";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		vin-supply = <&vcc3v3_baseboard>;
+	};
+
+	vcc2v8_dragonfish: vcc2v8-dragonfish {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc2v8-dragonfish";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <2800000>;
+		regulator-max-microvolt = <2800000>;
+		vin-supply = <&vcc3v3_baseboard>;
+	};
+
+
+
+
+	peafowl27m: peafowl27m {
+		compatible = "fixed-clock";
+		clock-frequency = <27000000>;
+		clock-output-names = "peafowl27m";
+		#clock-cells = <0>;
+	};
+
+};
+
+
 &i2c1 {
 	status = "okay";
 	clock-frequency = <400000>;
+
+	camera@10 {
+		compatible = "sony,imx219";
+		reg = <0x10>;
+		assigned-clocks = <&cru SCLK_CIF_OUT>;
+		assigned-clock-rates = <12000000>;
+		clocks = <&cru SCLK_CIF_OUT>;
+		enable-gpios = <&gpio4 RK_PD6 GPIO_ACTIVE_HIGH>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&cif_clkouta>, <&cam_reset>;
+		vddh-supply = <&vcc2v8_dragonfish>;
+		vddl-supply = <&vcc1v2_dragonfish>;
+		vdig-supply = <&vcc1v8_dragonfish>;
+
+		port {
+			csi1_out: endpoint {
+				remote-endpoint = <&csi1_ep1>;
+				clock-lanes = <0>;
+				data-lanes = <1 2 3 4>;
+				link-frequencies = /bits/ 64 <297000000>,
+						   /bits/ 64 <400000000>;
+			};
+		};
+	};
+
+/*	camera@10 {
+		compatible = "ovti,ov13850";
+		reg = <0x10>;
+		clocks = <&cru SCLK_CIF_OUT>;
+		clock-names = "xvclk";
+		avdd-supply = <&vcc2v8_dragonfish>;
+		dvdd-supply = <&vcc1v2_dragonfish>;
+		dovdd-supply = <&vcc1v8_dragonfish>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&cif_clkouta>, <&cam_reset>, <&cam_pwdn>;
+		powerdown-gpios = <&gpio2 RK_PA7 GPIO_ACTIVE_LOW>;
+		reset-gpios = <&gpio4 RK_PD6 GPIO_ACTIVE_LOW>;
+
+		port {
+			csi1_out: endpoint {
+				remote-endpoint = <&csi1_ep1>;
+				clock-lanes = <0>;
+				data-lanes = <1 2 3 4>;
+			};
+		};
+	}; */
+
+/*	tc358749@f {
+		compatible = "toshiba,tc358743";
+		reg = <0xf>;
+		clocks = <&peafowl27m>;
+		clock-names = "refclk";
+		interrupt-parent = <&gpio1>;
+		interrupts = <RK_PC7 IRQ_TYPE_LEVEL_HIGH>; */
+		/* pinctrl init state setting int low for 0xf address select */
+/*		pinctrl-names = "init", "default";
+		pinctrl-0 = <&tc358749_reset>, <&tc358749_int_low>;
+		pinctrl-1 = <&tc358749_reset>, <&tc358749_int>;
+		reset-gpios = <&gpio4 RK_PD6 GPIO_ACTIVE_LOW>;
+
+		port {
+			csi1_out: endpoint {
+				remote-endpoint = <&csi1_ep1>;
+				bus-type = <4>;
+				clock-lanes = <0>;
+				data-lanes = <1 2 3 4>;
+				link-frequencies = /bits/ 64 <297000000>,
+						   /bits/ 64 <400000000>;
+			};
+		};
+	}; */
+};
+
+//for ov13850
+&i2c7 {
+	status = "disabled";
+};
+
+&mipi_dsi1 {
+	status = "okay";
+};
+
+&isp1 {
+	status = "okay";
+
+	ports {
+		port@0 {
+			csi1_ep1: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&csi1_out>;
+				data-lanes = <1 2 3 4>;
+			};
+		};
+	};
 };
 
 &i2c2 {
@@ -163,6 +302,29 @@
 &pinctrl {
 	pinctrl-names = "default";
 	pinctrl-0 = <&haikou_pin_hog>;
+
+	cam {
+		/* only for ov13850 */
+		cam_pwdn: cam-pwdn {
+			rockchip,pins = <2 RK_PA7 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+
+		cam_reset: cam-reset {
+			rockchip,pins = <4 RK_PD6 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+
+		tc358749_int: tc358749-int {
+			rockchip,pins = <1 RK_PC7 RK_FUNC_GPIO &pcfg_pull_down>;
+		};
+
+		tc358749_int_low: tc358749-int-low {
+			rockchip,pins = <1 RK_PC7 RK_FUNC_GPIO &pcfg_output_low>;
+		};
+
+		tc358749_reset: tc358749-reset {
+			rockchip,pins = <4 RK_PD6 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
 
 	hog {
 		haikou_pin_hog: haikou-pin-hog {
