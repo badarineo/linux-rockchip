@@ -989,7 +989,7 @@ static int ov13850_power_on(struct ov13850 *ov13850)
 	}
 
 	if (!IS_ERR(ov13850->reset_gpio))
-		gpiod_set_value_cansleep(ov13850->reset_gpio, 0);
+		gpiod_set_value_cansleep(ov13850->reset_gpio, 1);
 
 	ret = regulator_bulk_enable(OV13850_NUM_SUPPLIES, ov13850->supplies);
 	if (ret < 0) {
@@ -998,11 +998,11 @@ static int ov13850_power_on(struct ov13850 *ov13850)
 	}
 
 	if (!IS_ERR(ov13850->reset_gpio))
-		gpiod_set_value_cansleep(ov13850->reset_gpio, 1);
+		gpiod_set_value_cansleep(ov13850->reset_gpio, 0);
 
 	usleep_range(500, 1000);
 	if (!IS_ERR(ov13850->pwdn_gpio))
-		gpiod_set_value_cansleep(ov13850->pwdn_gpio, 1);
+		gpiod_set_value_cansleep(ov13850->pwdn_gpio, 0);
 
 	/* 8192 cycles prior to first SCCB transaction */
 	delay_us = ov13850_cal_delay(8192);
@@ -1019,10 +1019,10 @@ disable_clk:
 static void ov13850_power_off(struct ov13850 *ov13850)
 {
 	if (!IS_ERR(ov13850->pwdn_gpio))
-		gpiod_set_value_cansleep(ov13850->pwdn_gpio, 0);
+		gpiod_set_value_cansleep(ov13850->pwdn_gpio, 1);
 	clk_disable_unprepare(ov13850->xvclk);
 	if (!IS_ERR(ov13850->reset_gpio))
-		gpiod_set_value_cansleep(ov13850->reset_gpio, 0);
+		gpiod_set_value_cansleep(ov13850->reset_gpio, 1);
 
 	regulator_bulk_disable(OV13850_NUM_SUPPLIES, ov13850->supplies);
 }
@@ -1271,19 +1271,19 @@ static int ov13850_probe(struct i2c_client *client,
 	}
 	ret = clk_set_rate(ov13850->xvclk, OV13850_XVCLK_FREQ);
 	if (ret < 0) {
-		dev_err(&client->dev, "Failed to set xvclk rate (24MHz)\n");
+		dev_err(&client->dev, "Failed to set xvclk rate (24MHz) %d\n", ret);
 		return ret;
 	}
 	if (clk_get_rate(ov13850->xvclk) != OV13850_XVCLK_FREQ)
 		dev_warn(&client->dev, "xvclk mismatched, modes are based on 24MHz\n");
 
-	ov13850->reset_gpio = devm_gpiod_get(&client->dev, "reset", GPIOD_OUT_LOW);
+	ov13850->reset_gpio = devm_gpiod_get(&client->dev, "reset", GPIOD_OUT_HIGH);
 	if (IS_ERR(ov13850->reset_gpio))
 		dev_warn(&client->dev, "Failed to get reset-gpios\n");
 
-	ov13850->pwdn_gpio = devm_gpiod_get(&client->dev, "pwdn", GPIOD_OUT_LOW);
+	ov13850->pwdn_gpio = devm_gpiod_get(&client->dev, "powerdown", GPIOD_OUT_HIGH);
 	if (IS_ERR(ov13850->pwdn_gpio))
-		dev_warn(&client->dev, "Failed to get pwdn-gpios\n");
+		dev_warn(&client->dev, "Failed to get powerdown-gpios\n");
 
 	ret = ov13850_configure_regulators(ov13850);
 	if (ret) {
