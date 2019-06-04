@@ -13,7 +13,9 @@
 #include <linux/init.h>
 #include <linux/io.h>
 #include <linux/module.h>
-#include <linux/of_graph.h>
+#include <linux/pm_runtime.h>
+#include <linux/regmap.h>
+#include <linux/regulator/consumer.h>
 #include <linux/slab.h>
 #include <linux/videodev2.h>
 #include <media/v4l2-ctrls.h>
@@ -21,6 +23,13 @@
 #include <media/v4l2-fwnode.h>
 #include <media/v4l2-image-sizes.h>
 #include <media/v4l2-mediabus.h>
+
+#define IMX219_DEFAULT_CLK_FREQ		24000000
+
+
+/* Chip ID */
+#define IMX219_REG_CHIP_ID		0x0000
+#define IMX219_CHIP_ID			0x0219
 
 /* IMX219 supported geometry */
 #define IMX219_TABLE_END		0xffff
@@ -40,7 +49,13 @@
 
 #define IMX219_EXP_LINES_MARGIN		4
 
-#define IMX219_DEFAULT_CLK_FREQ		12000000
+static const char * const imx219_supply_name[] = {
+	"vddh",
+	"vddl",
+	"vdig",
+};
+
+#define IMX219_NUM_SUPPLIES ARRAY_SIZE(imx219_supply_name)
 
 static const s64 link_freq_menu_items[] = {
 	456000000,
@@ -62,16 +77,6 @@ struct imx219_mode {
 
 /* MCLK:24MHz  3280x2464  21.2fps   MIPI LANE2 */
 static const struct imx219_reg imx219_init_tab_3280_2464_21fps[] = {
-	{0x30EB, 0x05},		/* Access Code for address over 0x3000 */
-	{0x30EB, 0x0C},		/* Access Code for address over 0x3000 */
-	{0x300A, 0xFF},		/* Access Code for address over 0x3000 */
-	{0x300B, 0xFF},		/* Access Code for address over 0x3000 */
-	{0x30EB, 0x05},		/* Access Code for address over 0x3000 */
-	{0x30EB, 0x09},		/* Access Code for address over 0x3000 */
-	{0x0114, 0x01},		/* CSI_LANE_MODE[1:0} */
-	{0x0128, 0x00},		/* DPHY_CNTRL */
-	{0x012A, 0x18},		/* EXCK_FREQ[15:8] */
-	{0x012B, 0x00},		/* EXCK_FREQ[7:0] */
 	{0x015A, 0x01},		/* INTEG TIME[15:8] */
 	{0x015B, 0xF4},		/* INTEG TIME[7:0] */
 	{0x0160, 0x09},		/* FRM_LENGTH_A[15:8] */
@@ -96,8 +101,6 @@ static const struct imx219_reg imx219_init_tab_3280_2464_21fps[] = {
 	{0x028D, 0x0A},		/* CSI_DATA_FORMAT_B[7:0] */
 	{0x0301, 0x05},		/* VTPXCK_DIV */
 	{0x0303, 0x01},		/* VTSYCK_DIV */
-	{0x0304, 0x03},		/* PREPLLCK_VT_DIV[3:0] */
-	{0x0305, 0x03},		/* PREPLLCK_OP_DIV[3:0] */
 	{0x0306, 0x00},		/* PLL_VT_MPY[10:8] */
 	{0x0307, 0x39},		/* PLL_VT_MPY[7:0] */
 	{0x0309, 0x0A},		/* OPPXCK_DIV[4:0] */
@@ -114,16 +117,6 @@ static const struct imx219_reg imx219_init_tab_3280_2464_21fps[] = {
 
 /* MCLK:24MHz  1920x1080  30fps   MIPI LANE2 */
 static const struct imx219_reg imx219_init_tab_1920_1080_30fps[] = {
-	{0x30EB, 0x05},
-	{0x30EB, 0x0C},
-	{0x300A, 0xFF},
-	{0x300B, 0xFF},
-	{0x30EB, 0x05},
-	{0x30EB, 0x09},
-	{0x0114, 0x01},
-	{0x0128, 0x00},
-	{0x012A, 0x18},
-	{0x012B, 0x00},
 	{0x0160, 0x06},
 	{0x0161, 0xE6},
 	{0x0162, 0x0D},
@@ -148,8 +141,6 @@ static const struct imx219_reg imx219_init_tab_1920_1080_30fps[] = {
 	{0x018D, 0x0A},
 	{0x0301, 0x05},
 	{0x0303, 0x01},
-	{0x0304, 0x03},
-	{0x0305, 0x03},
 	{0x0306, 0x00},
 	{0x0307, 0x39},
 	{0x0309, 0x0A},
@@ -165,13 +156,17 @@ static const struct imx219_reg imx219_init_tab_1920_1080_30fps[] = {
 	{IMX219_TABLE_END, 0x00}
 };
 
-static const struct imx219_reg start[] = {
-	{0x0100, 0x01},		/* mode select streaming on */
-	{IMX219_TABLE_END, 0x00}
-};
+static const struct imx219_reg mode_table_common[] = {
+	{0x30EB, 0x05},		/* Access Code for address over 0x3000 */
+	{0x30EB, 0x0C},		/* Access Code for address over 0x3000 */
+	{0x300A, 0xFF},		/* Access Code for address over 0x3000 */
+	{0x300B, 0xFF},		/* Access Code for address over 0x3000 */
+	{0x30EB, 0x05},		/* Access Code for address over 0x3000 */
+	{0x30EB, 0x09},		/* Access Code for address over 0x3000 */
 
-static const struct imx219_reg stop[] = {
-	{0x0100, 0x00},		/* mode select streaming off */
+	{0x0114, 0x01},		/* CSI_LANE_MODE[1:0] */
+	{0x0128, 0x00},		/* DPHY_CNTRL */
+
 	{IMX219_TABLE_END, 0x00}
 };
 
@@ -213,11 +208,16 @@ static const char *const tp_qmenu[] = {
 #define SIZEOF_I2C_TRANSBUF 32
 
 struct imx219 {
-	struct v4l2_subdev subdev;
-	struct media_pad pad;
-	struct v4l2_ctrl_handler ctrl_handler;
-	struct clk *xclk;
+	struct device *dev;
+	struct regmap *regmap;
+	struct clk *clk;
+
+	struct regulator_bulk_data supplies[IMX219_NUM_SUPPLIES];
 	struct gpio_desc *enable_gpio;
+
+	struct v4l2_subdev sd;
+	struct media_pad pad;
+	struct v4l2_ctrl_handler ctrls;
 	struct v4l2_rect crop_rect;
 	int hflip;
 	int vflip;
@@ -231,10 +231,37 @@ struct imx219 {
 	u16 test_pattern_solid_color_gb;
 	struct v4l2_ctrl *hblank;
 	struct v4l2_ctrl *vblank;
+	struct v4l2_ctrl *link_freq;
 	struct v4l2_ctrl *pixel_rate;
 	const struct imx219_mode *cur_mode;
 	u16 cur_vts;
+
+
+	/*
+	 * Serialize control access, get/set format, get selection
+	 * and start streaming.
+	 */
+	struct mutex mutex;
+
+	bool streaming;
 };
+
+static inline struct imx219 *to_imx219(struct v4l2_subdev *sd)
+{
+	return container_of(sd, struct imx219, sd);
+}
+
+/*
+ * pixel_rate = link_freq * data-rate * nr_of_lanes / bits_per_sample
+ * data rate => double data rate; number of lanes => 4; bits per pixel => 10
+ */
+static u64 link_freq_to_pixel_rate(u64 f)
+{
+	f *= 2 * 4;
+	do_div(f, 10);
+
+	return f;
+}
 
 static const struct imx219_mode supported_modes[] = {
 	{
@@ -255,10 +282,10 @@ static const struct imx219_mode supported_modes[] = {
 	},
 };
 
-static struct imx219 *to_imx219(const struct i2c_client *client)
+/*static struct imx219 *to_imx219(const struct i2c_client *client)
 {
 	return container_of(i2c_get_clientdata(client), struct imx219, subdev);
-}
+}*/
 
 static int reg_write(struct i2c_client *client, const u16 addr, const u8 data)
 {
@@ -280,153 +307,326 @@ static int reg_write(struct i2c_client *client, const u16 addr, const u8 data)
 	return ret == 1 ? 0 : -EIO;
 }
 
-static int reg_read(struct i2c_client *client, const u16 addr)
+#define MAX_CMD 4
+static int imx219_write_table(struct imx219 *imx219,
+			      const struct imx219_reg table[])
 {
-	u8 buf[2] = {addr >> 8, addr & 0xff};
-	int ret;
-	struct i2c_msg msgs[] = {
-		{
-			.addr  = client->addr,
-			.flags = 0,
-			.len   = 2,
-			.buf   = buf,
-		}, {
-			.addr  = client->addr,
-			.flags = I2C_M_RD,
-			.len   = 1,
-			.buf   = buf,
-		},
-	};
-
-	ret = i2c_transfer(client->adapter, msgs, ARRAY_SIZE(msgs));
-	if (ret < 0) {
-		dev_warn(&client->dev, "Reading register %x from %x failed\n",
-			 addr, client->addr);
-		return ret;
-	}
-
-	return buf[0];
-}
-
-static int reg_write_table(struct i2c_client *client,
-			   const struct imx219_reg table[])
-{
-	const struct imx219_reg *reg;
+	u8 vals[MAX_CMD];
+	int i;
 	int ret;
 
-	for (reg = table; reg->addr != IMX219_TABLE_END; reg++) {
-		ret = reg_write(client, reg->addr, reg->val);
-		if (ret < 0)
+	for (; table->addr != IMX219_TABLE_END ; table++) {
+/*		if (table->addr == IMX219_TABLE_WAIT_MS) {
+			usleep_range(table->val * 1000,
+				     table->val * 1000 + 500);
+			continue;
+		} */
+
+		for (i = 0; i < MAX_CMD; i++) {
+			if (table[i].addr != (table[0].addr + i))
+				break;
+			vals[i] = table[i].val;
+		}
+
+		ret = regmap_bulk_write(imx219->regmap, table->addr, vals, i);
+
+		if (ret) {
+			dev_err(imx219->dev, "write_table error: %d\n", ret);
 			return ret;
+		}
+
+		table += i - 1;
 	}
 
 	return 0;
+}
+
+static int imx219_power_on(struct device *dev)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct v4l2_subdev *sd = i2c_get_clientdata(client);
+	struct imx219 *imx219 = to_imx219(sd);
+	int ret;
+
+	dev_info(&client->dev, "imx219 power on\n");
+
+	ret = regulator_bulk_enable(IMX219_NUM_SUPPLIES, imx219->supplies);
+	if (ret < 0) {
+		dev_err(imx219->dev, "failed to enable regulators: %d\n", ret);
+		return ret;
+	}
+
+	ret = clk_prepare_enable(imx219->clk);
+	if (ret < 0) {
+		regulator_bulk_disable(IMX219_NUM_SUPPLIES, imx219->supplies);
+		dev_err(imx219->dev, "clk prepare enable failed\n");
+		return ret;
+	}
+
+	usleep_range(200, 300);
+
+	gpiod_set_value_cansleep(imx219->enable_gpio, 1);
+
+	/* t5:6ms + t6:30k clocks = 6ms at 6MHz */
+	usleep_range(12000, 15000);
+
+	return 0;
+}
+
+static int imx219_power_off(struct device *dev)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct v4l2_subdev *sd = i2c_get_clientdata(client);
+	struct imx219 *imx219 = to_imx219(sd);
+
+	gpiod_set_value_cansleep(imx219->enable_gpio, 0);
+	clk_disable_unprepare(imx219->clk);
+	regulator_bulk_disable(IMX219_NUM_SUPPLIES, imx219->supplies);
+
+	dev_info(&client->dev, "imx219 power off\n");
+
+	return 0;
+}
+
+
+
+#define IMX219_EXCK_FREQ_15_8	0x012a
+#define IMX219_EXCK_FREQ_7_0	0x012b
+
+#define IMX219_PREPLLCK_VT_DIV	0x0304
+#define IMX219_PREPLLCK_OP_DIV	0x0305
+
+static int imx219_setup_clock(struct imx219 *imx219)
+{
+	unsigned long rate;
+	u16 rate_reg;
+	u8 div;
+	int ret;
+
+	rate = clk_get_rate(imx219->clk);
+	rate /= (1000 * 1000);
+
+	if (rate < 6 || rate > 27) {
+		dev_err(imx219->dev, "clk rate needs to be 6 - 27 MHz\n");
+		return -EINVAL;
+	}
+
+	if (rate < 12)
+		div = 1;
+	else if (rate > 24)
+		div = 3;
+	else
+		div = 2;
+
+	rate_reg = cpu_to_le16(rate);
+
+printk("%s: div is %d\n", __func__, div);
+printk("%s: writing 0x%x\n", __func__, rate_reg & 0xff);
+	ret = regmap_write(imx219->regmap, IMX219_EXCK_FREQ_15_8,
+					   rate_reg & 0xff);
+	if (ret < 0)
+		return ret;
+
+printk("%s: writing 0x%x\n", __func__, (rate_reg >> 8) & 0xff);
+	ret = regmap_write(imx219->regmap, IMX219_EXCK_FREQ_7_0,
+					   (rate_reg >> 8) & 0xff);
+	if (ret < 0)
+		return ret;
+
+	ret = regmap_write(imx219->regmap, IMX219_PREPLLCK_VT_DIV, div);
+	if (ret < 0)
+		return ret;
+
+	ret = regmap_write(imx219->regmap, IMX219_PREPLLCK_OP_DIV, div);
+	if (ret < 0)
+		return ret;
+
+	return 0;
+}
+
+static int imx219_start_streaming(struct imx219 *imx219)
+{
+	struct i2c_client *client = v4l2_get_subdevdata(&imx219->sd);
+	int ret;
+	u8 reg;
+
+	mutex_lock(&imx219->mutex);
+
+	ret = imx219_setup_clock(imx219);
+	if (ret < 0) {
+		dev_err(&client->dev, "failed to setup clocks %d\n", ret);
+		goto error;
+	}
+
+	ret = imx219_write_table(imx219, mode_table_common);
+	if (ret) {
+		dev_err(&client->dev, "mode reg table failed %d\n", ret);
+		goto error;
+	}
+
+	ret = imx219_write_table(imx219, imx219->cur_mode->reg_list);
+	if (ret) {
+		dev_err(&client->dev, "mode reg table failed %d\n", ret);
+		goto error;
+	}
+
+	/* Handle crop */
+	ret = reg_write(client, 0x0164, imx219->crop_rect.left >> 8);
+	ret |= reg_write(client, 0x0165, imx219->crop_rect.left & 0xff);
+	ret |= reg_write(client, 0x0166, (imx219->crop_rect.left + imx219->crop_rect.width - 1) >> 8);
+	ret |= reg_write(client, 0x0167, (imx219->crop_rect.left + imx219->crop_rect.width - 1) & 0xff);
+	ret |= reg_write(client, 0x0168, imx219->crop_rect.top >> 8);
+	ret |= reg_write(client, 0x0169, imx219->crop_rect.top & 0xff);
+	ret |= reg_write(client, 0x016A, (imx219->crop_rect.top + imx219->crop_rect.height - 1) >> 8);
+	ret |= reg_write(client, 0x016B, (imx219->crop_rect.top + imx219->crop_rect.height - 1) & 0xff);
+	ret |= reg_write(client, 0x016C, imx219->crop_rect.width >> 8);
+	ret |= reg_write(client, 0x016D, imx219->crop_rect.width & 0xff);
+	ret |= reg_write(client, 0x016E, imx219->crop_rect.height >> 8);
+	ret |= reg_write(client, 0x016F, imx219->crop_rect.height & 0xff);
+
+	if (ret) {
+		dev_err(&client->dev, "setting crop failed %d\n", ret);
+		goto error;
+	}
+
+	reg = 0x0;
+	/* Handle flip/mirror */
+	if (imx219->hflip)
+		reg |= 0x1;
+	if (imx219->vflip)
+		reg |= 0x2;
+
+	ret = reg_write(client, 0x0172, reg);
+	if (ret) {
+		dev_err(&client->dev, "setting flip failed %d\n", ret);
+		goto error;
+	}
+
+	/* Handle test pattern */
+	if (imx219->test_pattern) {
+		ret = reg_write(client, 0x0600, imx219->test_pattern >> 8);
+		ret |= reg_write(client, 0x0601, imx219->test_pattern & 0xff);
+		ret |= reg_write(client, 0x0602,
+				 imx219->test_pattern_solid_color_r >> 8);
+		ret |= reg_write(client, 0x0603,
+				 imx219->test_pattern_solid_color_r & 0xff);
+		ret |= reg_write(client, 0x0604,
+				 imx219->test_pattern_solid_color_gr >> 8);
+		ret |= reg_write(client, 0x0605,
+				 imx219->test_pattern_solid_color_gr & 0xff);
+		ret |= reg_write(client, 0x0606,
+				 imx219->test_pattern_solid_color_b >> 8);
+		ret |= reg_write(client, 0x0607,
+				 imx219->test_pattern_solid_color_b & 0xff);
+		ret |= reg_write(client, 0x0608,
+				 imx219->test_pattern_solid_color_gb >> 8);
+		ret |= reg_write(client, 0x0609,
+				 imx219->test_pattern_solid_color_gb & 0xff);
+		ret |= reg_write(client, 0x0620, imx219->crop_rect.left >> 8);
+		ret |= reg_write(client, 0x0621, imx219->crop_rect.left & 0xff);
+		ret |= reg_write(client, 0x0622, imx219->crop_rect.top >> 8);
+		ret |= reg_write(client, 0x0623, imx219->crop_rect.top & 0xff);
+		ret |= reg_write(client, 0x0624, imx219->crop_rect.width >> 8);
+		ret |= reg_write(client, 0x0625, imx219->crop_rect.width & 0xff);
+		ret |= reg_write(client, 0x0626, imx219->crop_rect.height >> 8);
+		ret |= reg_write(client, 0x0627, imx219->crop_rect.height & 0xff);
+	} else {
+		ret = reg_write(client, 0x0600, 0x00);
+		ret |= reg_write(client, 0x0601, 0x00);
+	}
+	if (ret)
+		goto error;
+
+	imx219->cur_vts = imx219->cur_mode->vts_def - IMX219_EXP_LINES_MARGIN;
+
+	ret = __v4l2_ctrl_handler_setup(&imx219->ctrls);
+	if (ret < 0) {
+		dev_err(imx219->dev, "could not sync v4l2 controls\n");
+		goto error;
+	}
+
+	ret = regmap_write(imx219->regmap, 0x100, 1);
+	if (ret < 0) {
+		dev_err(imx219->dev, "could not sent start command %d\n", ret);
+		goto error;
+	}
+
+	mutex_unlock(&imx219->mutex);
+	return 0;
+
+error:
+	mutex_unlock(&imx219->mutex);
+	return ret;
+}
+
+static int imx219_stop_streaming(struct imx219 *imx219)
+{
+	int ret;
+
+	ret = regmap_write(imx219->regmap, 0x100, 0);
+	if (ret < 0)
+		dev_err(imx219->dev, "could not sent stop command %d\n", ret);
+
+	return ret;
 }
 
 /* V4L2 subdev video operations */
 static int imx219_s_stream(struct v4l2_subdev *sd, int enable)
 {
-	struct i2c_client *client = v4l2_get_subdevdata(sd);
-	struct imx219 *priv = to_imx219(client);
-	u8 reg = 0x00;
+	struct imx219 *imx219 = to_imx219(sd);
 	int ret;
 
-	if (!enable)
-		return reg_write_table(client, stop);
+	if (imx219->streaming == enable)
+		return 0;
 
-	ret = reg_write_table(client, priv->cur_mode->reg_list);
-	if (ret)
-		return ret;
+	if (enable) {
+		ret = pm_runtime_get_sync(imx219->dev);
+		if (ret < 0) {
+			dev_err(imx219->dev, "runtime_get failed %d\n", ret);
+			pm_runtime_put_noidle(imx219->dev);
+			return ret;
+		}
 
-	/* Handle crop */
-	ret = reg_write(client, 0x0164, priv->crop_rect.left >> 8);
-	ret |= reg_write(client, 0x0165, priv->crop_rect.left & 0xff);
-	ret |= reg_write(client, 0x0166, (priv->crop_rect.left + priv->crop_rect.width - 1) >> 8);
-	ret |= reg_write(client, 0x0167, (priv->crop_rect.left + priv->crop_rect.width - 1) & 0xff);
-	ret |= reg_write(client, 0x0168, priv->crop_rect.top >> 8);
-	ret |= reg_write(client, 0x0169, priv->crop_rect.top & 0xff);
-	ret |= reg_write(client, 0x016A, (priv->crop_rect.top + priv->crop_rect.height - 1) >> 8);
-	ret |= reg_write(client, 0x016B, (priv->crop_rect.top + priv->crop_rect.height - 1) & 0xff);
-	ret |= reg_write(client, 0x016C, priv->crop_rect.width >> 8);
-	ret |= reg_write(client, 0x016D, priv->crop_rect.width & 0xff);
-	ret |= reg_write(client, 0x016E, priv->crop_rect.height >> 8);
-	ret |= reg_write(client, 0x016F, priv->crop_rect.height & 0xff);
-
-	if (ret)
-		return ret;
-
-	/* Handle flip/mirror */
-	if (priv->hflip)
-		reg |= 0x1;
-	if (priv->vflip)
-		reg |= 0x2;
-
-	ret = reg_write(client, 0x0172, reg);
-	if (ret)
-		return ret;
-
-	/* Handle test pattern */
-	if (priv->test_pattern) {
-		ret = reg_write(client, 0x0600, priv->test_pattern >> 8);
-		ret |= reg_write(client, 0x0601, priv->test_pattern & 0xff);
-		ret |= reg_write(client, 0x0602,
-				 priv->test_pattern_solid_color_r >> 8);
-		ret |= reg_write(client, 0x0603,
-				 priv->test_pattern_solid_color_r & 0xff);
-		ret |= reg_write(client, 0x0604,
-				 priv->test_pattern_solid_color_gr >> 8);
-		ret |= reg_write(client, 0x0605,
-				 priv->test_pattern_solid_color_gr & 0xff);
-		ret |= reg_write(client, 0x0606,
-				 priv->test_pattern_solid_color_b >> 8);
-		ret |= reg_write(client, 0x0607,
-				 priv->test_pattern_solid_color_b & 0xff);
-		ret |= reg_write(client, 0x0608,
-				 priv->test_pattern_solid_color_gb >> 8);
-		ret |= reg_write(client, 0x0609,
-				 priv->test_pattern_solid_color_gb & 0xff);
-		ret |= reg_write(client, 0x0620, priv->crop_rect.left >> 8);
-		ret |= reg_write(client, 0x0621, priv->crop_rect.left & 0xff);
-		ret |= reg_write(client, 0x0622, priv->crop_rect.top >> 8);
-		ret |= reg_write(client, 0x0623, priv->crop_rect.top & 0xff);
-		ret |= reg_write(client, 0x0624, priv->crop_rect.width >> 8);
-		ret |= reg_write(client, 0x0625, priv->crop_rect.width & 0xff);
-		ret |= reg_write(client, 0x0626, priv->crop_rect.height >> 8);
-		ret |= reg_write(client, 0x0627, priv->crop_rect.height & 0xff);
+		ret = imx219_start_streaming(imx219);
+		if (ret < 0) {
+			dev_err(imx219->dev, "start_streaming failed %d\n", ret);
+			goto err_rpm_put;
+		}
 	} else {
-		ret = reg_write(client, 0x0600, 0x00);
-		ret |= reg_write(client, 0x0601, 0x00);
+		ret = imx219_stop_streaming(imx219);
+		if (ret < 0)
+			goto err_rpm_put;
+		pm_runtime_put(imx219->dev);
 	}
 
-	priv->cur_vts = priv->cur_mode->vts_def - IMX219_EXP_LINES_MARGIN;
-	if (ret)
-		return ret;
+	imx219->streaming = enable;
+	return 0;
 
-	return reg_write_table(client, start);
+err_rpm_put:
+	pm_runtime_put(imx219->dev);
+	return ret;
+
 }
 
 /* V4L2 subdev core operations */
-static int imx219_s_power(struct v4l2_subdev *sd, int on)
+/*static int imx219_s_power(struct v4l2_subdev *sd, int on)
 {
-	struct i2c_client *client = v4l2_get_subdevdata(sd);
-	struct imx219 *priv = to_imx219(client);
+	struct imx219 *imx219 = to_imx219(sd);
 
-	if (on)	{
-		dev_info(&client->dev, "imx219 power on\n");
-		clk_prepare_enable(priv->xclk);
+	if (on) {
+		return imx219_power_on(imx219->dev);
 	} else if (!on) {
-		dev_info(&client->dev, "imx219 power off\n");
-		clk_disable_unprepare(priv->xclk);
+		return imx219_power_off(imx219->dev);
 	}
 
 	return 0;
-}
+}*/
 
 /* V4L2 ctrl operations */
 static int imx219_s_ctrl_test_pattern(struct v4l2_ctrl *ctrl)
 {
 	struct imx219 *priv =
-	    container_of(ctrl->handler, struct imx219, ctrl_handler);
+	    container_of(ctrl->handler, struct imx219, ctrls);
 
 	switch (ctrl->val) {
 	case TEST_PATTERN_DISABLED:
@@ -501,8 +701,7 @@ static int imx219_s_ctrl_test_pattern(struct v4l2_ctrl *ctrl)
 static int imx219_g_frame_interval(struct v4l2_subdev *sd,
 				   struct v4l2_subdev_frame_interval *fi)
 {
-	struct i2c_client *client = v4l2_get_subdevdata(sd);
-	struct imx219 *priv = to_imx219(client);
+	struct imx219 *priv = to_imx219(sd);
 	const struct imx219_mode *mode = priv->cur_mode;
 
 	fi->interval.numerator = 10000;
@@ -514,34 +713,35 @@ static int imx219_g_frame_interval(struct v4l2_subdev *sd,
 static int imx219_s_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct imx219 *priv =
-	    container_of(ctrl->handler, struct imx219, ctrl_handler);
-	struct i2c_client *client = v4l2_get_subdevdata(&priv->subdev);
+	    container_of(ctrl->handler, struct imx219, ctrls);
+	struct i2c_client *client = v4l2_get_subdevdata(&priv->sd);
 	u8 reg;
-	int ret;
+	int ret = 0;
 	u16 gain = 256;
 	u16 a_gain = 256;
 	u16 d_gain = 1;
 
-//	ret = imx219_s_power(&priv->subdev, 1);
-//	if (ret < 0)
-//		return ret;
+	/*
+	 * Applying V4L2 control value only happens
+	 * when power is up for streaming
+	 */
+	ret = pm_runtime_get_if_in_use(priv->dev);
+	if (ret <= 0)
+		return 0;
 
 	switch (ctrl->id) {
 	case V4L2_CID_HFLIP:
 		priv->hflip = ctrl->val;
 		break;
-
 	case V4L2_CID_VFLIP:
 		priv->vflip = ctrl->val;
 		break;
-
 	case V4L2_CID_ANALOGUE_GAIN:
 	case V4L2_CID_GAIN:
 		/*
 		 * hal transfer (gain * 256)  to kernel
 		 * than divide into analog gain & digital gain in kernel
 		 */
-
 		gain = ctrl->val;
 		if (gain < 256)
 			gain = 256;
@@ -582,23 +782,20 @@ static int imx219_s_ctrl(struct v4l2_ctrl *ctrl)
 		 * exposure time , gain, vts must change at the same time
 		 * so the exposure & gain can reflect at the same frame
 		 */
-
 		ret = reg_write(client, 0x0157, priv->analogue_gain);
 		ret |= reg_write(client, 0x0158, priv->digital_gain >> 8);
 		ret |= reg_write(client, 0x0159, priv->digital_gain & 0xff);
 
-		return ret;
-
+		goto out;
 	case V4L2_CID_EXPOSURE:
 		priv->exposure_time = ctrl->val;
 
 		ret = reg_write(client, 0x015a, priv->exposure_time >> 8);
 		ret |= reg_write(client, 0x015b, priv->exposure_time & 0xff);
-		return ret;
-
+		goto out;
 	case V4L2_CID_TEST_PATTERN:
-		return imx219_s_ctrl_test_pattern(ctrl);
-
+		ret = imx219_s_ctrl_test_pattern(ctrl);
+		goto out;
 	case V4L2_CID_VBLANK:
 		if (ctrl->val < priv->cur_mode->vts_def)
 			ctrl->val = priv->cur_mode->vts_def;
@@ -606,16 +803,19 @@ static int imx219_s_ctrl(struct v4l2_ctrl *ctrl)
 			priv->cur_vts = ctrl->val - IMX219_EXP_LINES_MARGIN;
 		ret = reg_write(client, 0x0160, ((priv->cur_vts >> 8) & 0xff));
 		ret |= reg_write(client, 0x0161, (priv->cur_vts & 0xff));
-		return ret;
-
+		goto out;
 	default:
-		return -EINVAL;
+		ret = -EINVAL;
+		goto out;
 	}
 
 	/* If enabled, apply settings immediately */
-	reg = reg_read(client, 0x0100);
+/*	reg = reg_read(client, 0x0100);
 	if ((reg & 0x1f) == 0x01)
-		imx219_s_stream(&priv->subdev, 1);
+		imx219_s_stream(&priv->sd, 1); */
+
+out:
+	pm_runtime_put(priv->dev);
 
 	return 0;
 }
@@ -680,13 +880,14 @@ static int imx219_set_fmt(struct v4l2_subdev *sd,
 			  struct v4l2_subdev_pad_config *cfg,
 			  struct v4l2_subdev_format *fmt)
 {
-	struct i2c_client *client = v4l2_get_subdevdata(sd);
-	struct imx219 *priv = to_imx219(client);
+	struct imx219 *priv = to_imx219(sd);
 	const struct imx219_mode *mode;
 	s64 h_blank, v_blank, pixel_rate;
 
 	if (fmt->which == V4L2_SUBDEV_FORMAT_TRY)
 		return 0;
+
+	mutex_lock(&priv->mutex);
 
 	mode = imx219_find_best_fit(fmt);
 	fmt->format.code = MEDIA_BUS_FMT_SRGGB10_1X10;
@@ -715,6 +916,8 @@ static int imx219_set_fmt(struct v4l2_subdev *sd,
 	priv->crop_rect.width = mode->width;
 	priv->crop_rect.height = mode->height;
 
+	mutex_unlock(&priv->mutex);
+
 	return 0;
 }
 
@@ -722,17 +925,20 @@ static int imx219_get_fmt(struct v4l2_subdev *sd,
 			  struct v4l2_subdev_pad_config *cfg,
 			  struct v4l2_subdev_format *fmt)
 {
-	struct i2c_client *client = v4l2_get_subdevdata(sd);
-	struct imx219 *priv = to_imx219(client);
+	struct imx219 *priv = to_imx219(sd);
 	const struct imx219_mode *mode = priv->cur_mode;
 
 	if (fmt->which == V4L2_SUBDEV_FORMAT_TRY)
 		return 0;
 
+	mutex_lock(&priv->mutex);
+
 	fmt->format.width = mode->width;
 	fmt->format.height = mode->height;
 	fmt->format.code = MEDIA_BUS_FMT_SRGGB10_1X10;
 	fmt->format.field = V4L2_FIELD_NONE;
+
+	mutex_unlock(&priv->mutex);
 
 	return 0;
 }
@@ -743,9 +949,9 @@ static struct v4l2_subdev_video_ops imx219_subdev_video_ops = {
 	.g_frame_interval = imx219_g_frame_interval,
 };
 
-static struct v4l2_subdev_core_ops imx219_subdev_core_ops = {
+/*static struct v4l2_subdev_core_ops imx219_subdev_core_ops = {
 	.s_power = imx219_s_power,
-};
+};*/
 
 static const struct v4l2_subdev_pad_ops imx219_subdev_pad_ops = {
 	.enum_mbus_code = imx219_enum_mbus_code,
@@ -755,7 +961,7 @@ static const struct v4l2_subdev_pad_ops imx219_subdev_pad_ops = {
 };
 
 static struct v4l2_subdev_ops imx219_subdev_ops = {
-	.core = &imx219_subdev_core_ops,
+//	.core = &imx219_subdev_core_ops,
 	.video = &imx219_subdev_video_ops,
 	.pad = &imx219_subdev_pad_ops,
 };
@@ -764,108 +970,64 @@ static const struct v4l2_ctrl_ops imx219_ctrl_ops = {
 	.s_ctrl = imx219_s_ctrl,
 };
 
-static int imx219_video_probe(struct i2c_client *client)
+static int imx219_identify_module(struct imx219 *imx219)
 {
-	struct v4l2_subdev *subdev = i2c_get_clientdata(client);
 	u16 model_id;
-	u32 lot_id;
-	u16 chip_id;
+	u8 reg[2];
 	int ret;
 
-	ret = imx219_s_power(subdev, 1);
-	if (ret < 0)
+	ret = regmap_bulk_read(imx219->regmap, IMX219_REG_CHIP_ID, reg, 2);
+	if (ret)
 		return ret;
-
-	/* Check and show model, lot, and chip ID. */
-	ret = reg_read(client, 0x0000);
-	if (ret < 0) {
-		dev_err(&client->dev, "Failure to read Model ID (high byte)\n");
-		goto done;
-	}
-	model_id = ret << 8;
-
-	ret = reg_read(client, 0x0001);
-	if (ret < 0) {
-		dev_err(&client->dev, "Failure to read Model ID (low byte)\n");
-		goto done;
-	}
-	model_id |= ret;
-
-	ret = reg_read(client, 0x0004);
-	if (ret < 0) {
-		dev_err(&client->dev, "Failure to read Lot ID (high byte)\n");
-		goto done;
-	}
-	lot_id = ret << 16;
-
-	ret = reg_read(client, 0x0005);
-	if (ret < 0) {
-		dev_err(&client->dev, "Failure to read Lot ID (mid byte)\n");
-		goto done;
-	}
-	lot_id |= ret << 8;
-
-	ret = reg_read(client, 0x0006);
-	if (ret < 0) {
-		dev_err(&client->dev, "Failure to read Lot ID (low byte)\n");
-		goto done;
-	}
-	lot_id |= ret;
-
-	ret = reg_read(client, 0x000D);
-	if (ret < 0) {
-		dev_err(&client->dev, "Failure to read Chip ID (high byte)\n");
-		goto done;
-	}
-	chip_id = ret << 8;
-
-	ret = reg_read(client, 0x000E);
-	if (ret < 0) {
-		dev_err(&client->dev, "Failure to read Chip ID (low byte)\n");
-		goto done;
-	}
-	chip_id |= ret;
+	model_id = reg[0] << 8 | reg[1];
 
 	if (model_id != 0x0219) {
-		dev_err(&client->dev, "Model ID: %x not supported!\n",
-			model_id);
-		ret = -ENODEV;
-		goto done;
+		dev_err(imx219->dev, "Model ID: %x not supported!\n", model_id);
+		return -ENODEV;
 	}
-	dev_info(&client->dev,
-		 "Model ID 0x%04x, Lot ID 0x%06x, Chip ID 0x%04x\n",
-		 model_id, lot_id, chip_id);
-done:
-	imx219_s_power(subdev, 0);
-	return ret;
+
+	dev_info(imx219->dev, "Model ID: %x\n", model_id);
+
+	return 0;
+}
+
+static int imx219_get_regulators(struct imx219 *imx219)
+{
+	unsigned int i;
+
+	for (i = 0; i < IMX219_NUM_SUPPLIES; i++)
+		imx219->supplies[i].supply = imx219_supply_name[i];
+
+	return devm_regulator_bulk_get(imx219->dev, IMX219_NUM_SUPPLIES,
+				       imx219->supplies);
 }
 
 static int imx219_ctrls_init(struct v4l2_subdev *sd)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
-	struct imx219 *priv = to_imx219(client);
+	struct imx219 *priv = to_imx219(sd);
 	const struct imx219_mode *mode = priv->cur_mode;
 	s64 pixel_rate, h_blank, v_blank;
 	int ret;
 
-	v4l2_ctrl_handler_init(&priv->ctrl_handler, 10);
-	v4l2_ctrl_new_std(&priv->ctrl_handler, &imx219_ctrl_ops,
+	v4l2_ctrl_handler_init(&priv->ctrls, 10);
+	v4l2_ctrl_new_std(&priv->ctrls, &imx219_ctrl_ops,
 			  V4L2_CID_HFLIP, 0, 1, 1, 0);
-	v4l2_ctrl_new_std(&priv->ctrl_handler, &imx219_ctrl_ops,
+	v4l2_ctrl_new_std(&priv->ctrls, &imx219_ctrl_ops,
 			  V4L2_CID_VFLIP, 0, 1, 1, 0);
 
 	/* exposure */
-	v4l2_ctrl_new_std(&priv->ctrl_handler, &imx219_ctrl_ops,
+	v4l2_ctrl_new_std(&priv->ctrls, &imx219_ctrl_ops,
 			  V4L2_CID_ANALOGUE_GAIN,
 			  IMX219_ANALOGUE_GAIN_MIN,
 			  IMX219_ANALOGUE_GAIN_MAX,
 			  1, IMX219_ANALOGUE_GAIN_DEFAULT);
-	v4l2_ctrl_new_std(&priv->ctrl_handler, &imx219_ctrl_ops,
+	v4l2_ctrl_new_std(&priv->ctrls, &imx219_ctrl_ops,
 			  V4L2_CID_GAIN,
 			  IMX219_DIGITAL_GAIN_MIN,
 			  IMX219_DIGITAL_GAIN_MAX, 1,
 			  IMX219_DIGITAL_GAIN_DEFAULT);
-	v4l2_ctrl_new_std(&priv->ctrl_handler, &imx219_ctrl_ops,
+	v4l2_ctrl_new_std(&priv->ctrls, &imx219_ctrl_ops,
 			  V4L2_CID_EXPOSURE,
 			  IMX219_DIGITAL_EXPOSURE_MIN,
 			  IMX219_DIGITAL_EXPOSURE_MAX, 1,
@@ -873,117 +1035,200 @@ static int imx219_ctrls_init(struct v4l2_subdev *sd)
 
 	/* blank */
 	h_blank = mode->hts_def - mode->width;
-	priv->hblank = v4l2_ctrl_new_std(&priv->ctrl_handler, NULL, V4L2_CID_HBLANK,
+	priv->hblank = v4l2_ctrl_new_std(&priv->ctrls, NULL, V4L2_CID_HBLANK,
 			  h_blank, h_blank, 1, h_blank);
 	v_blank = mode->vts_def - mode->height;
-	priv->vblank = v4l2_ctrl_new_std(&priv->ctrl_handler, NULL, V4L2_CID_VBLANK,
+	priv->vblank = v4l2_ctrl_new_std(&priv->ctrls, NULL, V4L2_CID_VBLANK,
 			  v_blank, v_blank, 1, v_blank);
 
 	/* freq */
-	v4l2_ctrl_new_int_menu(&priv->ctrl_handler, NULL, V4L2_CID_LINK_FREQ,
+	priv->link_freq = v4l2_ctrl_new_int_menu(&priv->ctrls, NULL,
+						V4L2_CID_LINK_FREQ,
 			       0, 0, link_freq_menu_items);
-	pixel_rate = mode->vts_def * mode->hts_def * mode->max_fps;
-	priv->pixel_rate = v4l2_ctrl_new_std(&priv->ctrl_handler, NULL, V4L2_CID_PIXEL_RATE,
+	if (priv->link_freq)
+		priv->link_freq->flags |= V4L2_CTRL_FLAG_READ_ONLY;
+
+
+//	pixel_rate = mode->vts_def * mode->hts_def * mode->max_fps;
+	pixel_rate = link_freq_to_pixel_rate(link_freq_menu_items[0]);
+	priv->pixel_rate = v4l2_ctrl_new_std(&priv->ctrls, NULL, V4L2_CID_PIXEL_RATE,
 			  0, pixel_rate, 1, pixel_rate);
 
-	v4l2_ctrl_new_std_menu_items(&priv->ctrl_handler, &imx219_ctrl_ops,
+	v4l2_ctrl_new_std_menu_items(&priv->ctrls, &imx219_ctrl_ops,
 				     V4L2_CID_TEST_PATTERN,
 				     ARRAY_SIZE(tp_qmenu) - 1, 0, 0, tp_qmenu);
 
-	priv->subdev.ctrl_handler = &priv->ctrl_handler;
-	if (priv->ctrl_handler.error) {
+	priv->sd.ctrl_handler = &priv->ctrls;
+	if (priv->ctrls.error) {
 		dev_err(&client->dev, "Error %d adding controls\n",
-			priv->ctrl_handler.error);
-		ret = priv->ctrl_handler.error;
+			priv->ctrls.error);
+		ret = priv->ctrls.error;
 		goto error;
 	}
 
-	ret = v4l2_ctrl_handler_setup(&priv->ctrl_handler);
+/*	ret = v4l2_ctrl_handler_setup(&priv->ctrls);
 	if (ret < 0) {
 		dev_err(&client->dev, "Error %d setting default controls\n",
 			ret);
 		goto error;
-	}
+	} */
 
 	return 0;
 error:
-	v4l2_ctrl_handler_free(&priv->ctrl_handler);
+	v4l2_ctrl_handler_free(&priv->ctrls);
 	return ret;
 }
+
+static int __maybe_unused imx219_suspend(struct device *dev)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct v4l2_subdev *sd = i2c_get_clientdata(client);
+	struct imx219 *imx219 = to_imx219(sd);
+
+	if (imx219->streaming)
+		imx219_stop_streaming(imx219);
+
+	return 0;
+}
+
+static int __maybe_unused imx219_resume(struct device *dev)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct v4l2_subdev *sd = i2c_get_clientdata(client);
+	struct imx219 *imx219 = to_imx219(sd);
+	int ret;
+
+	if (imx219->streaming) {
+		ret = imx219_start_streaming(imx219);
+		if (ret)
+			goto error;
+	}
+
+	return 0;
+
+error:
+	imx219_stop_streaming(imx219);
+	imx219->streaming = 0;
+	return ret;
+}
+
+static const struct dev_pm_ops imx219_pm_ops = {
+	SET_SYSTEM_SLEEP_PM_OPS(imx219_suspend, imx219_resume)
+	SET_RUNTIME_PM_OPS(imx219_power_off, imx219_power_on, NULL)
+};
+
+static const struct regmap_config sensor_regmap_config = {
+	.reg_bits = 16,
+	.val_bits = 8,
+	.cache_type = REGCACHE_RBTREE,
+};
 
 static int imx219_probe(struct i2c_client *client,
 			const struct i2c_device_id *did)
 {
-	struct i2c_adapter *adapter = to_i2c_adapter(client->dev.parent);
-	struct imx219 *priv;
+	struct imx219 *imx219;
 	int ret;
 
-	if (!i2c_check_functionality(adapter, I2C_FUNC_SMBUS_BYTE_DATA)) {
-		dev_warn(&adapter->dev,
-			 "I2C-Adapter doesn't support I2C_FUNC_SMBUS_BYTE\n");
-		return -EIO;
-	}
-	priv = devm_kzalloc(&client->dev, sizeof(struct imx219), GFP_KERNEL);
-	if (!priv)
+	imx219 = devm_kzalloc(&client->dev, sizeof(struct imx219), GFP_KERNEL);
+	if (!imx219)
 		return -ENOMEM;
 
-	priv->xclk = devm_clk_get(&client->dev, NULL);
-	if (IS_ERR(priv->clk)) {
+	imx219->dev = &client->dev;
+
+	imx219->clk = devm_clk_get(&client->dev, NULL);
+	if (IS_ERR(imx219->clk)) {
 		dev_info(&client->dev, "Error %ld getting clock\n",
-			 PTR_ERR(priv->clk));
+			 PTR_ERR(imx219->clk));
 		return -EPROBE_DEFER;
 	}
 
-	ret = clk_set_rate(priv->xclk, IMX219_DEFAULT_CLK_FREQ);
-	if (ret) {
-		dev_err(dev, "could not set xclk frequency\n");
+	ret = imx219_get_regulators(imx219);
+	if (ret < 0) {
+		dev_err(&client->dev, "cannot get regulators\n");
 		return ret;
 	}
 
-	priv->enable_gpio = devm_gpiod_get(dev, "enable", GPIOD_OUT_LOW);
-	if (IS_ERR(priv->enable_gpio)) {
-		dev_err(dev, "cannot get enable gpio\n");
-		return PTR_ERR(priv->enable_gpio);
+	imx219->enable_gpio = devm_gpiod_get(&client->dev, "enable", GPIOD_OUT_LOW);
+	if (IS_ERR(imx219->enable_gpio)) {
+		dev_err(&client->dev, "cannot get enable gpio\n");
+		return PTR_ERR(imx219->enable_gpio);
+	}
+
+	imx219->regmap = devm_regmap_init_i2c(client, &sensor_regmap_config);
+	if (IS_ERR(imx219->regmap)) {
+		dev_err(&client->dev, "regmap init failed\n");
+		return PTR_ERR(imx219->regmap);
 	}
 
 	/* 1920 * 1080 by default */
-	priv->cur_mode = &supported_modes[0];
+	imx219->cur_mode = &supported_modes[0];
 
-	priv->crop_rect.left = 680;
-	priv->crop_rect.top = 692;
-	priv->crop_rect.width = priv->cur_mode->width;
-	priv->crop_rect.height = priv->cur_mode->height;
+	imx219->crop_rect.left = 680;
+	imx219->crop_rect.top = 692;
+	imx219->crop_rect.width = imx219->cur_mode->width;
+	imx219->crop_rect.height = imx219->cur_mode->height;
 
-	v4l2_i2c_subdev_init(&priv->subdev, client, &imx219_subdev_ops);
-	ret = imx219_video_probe(client);
+	v4l2_i2c_subdev_init(&imx219->sd, client, &imx219_subdev_ops);
+
+	imx219_power_on(imx219->dev);
+
+	/* Check module identity */
+	ret = imx219_identify_module(imx219);
 	if (ret < 0)
-		return ret;
+		goto err_powerdown;
 
-	ret = imx219_ctrls_init(&priv->subdev);
+	ret = imx219_ctrls_init(&imx219->sd);
 	if (ret < 0)
-		return ret;
+		goto err_powerdown;
 
-	priv->subdev.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
-	priv->pad.flags = MEDIA_PAD_FL_SOURCE;
-	priv->subdev.entity.function = MEDIA_ENT_F_CAM_SENSOR;
-	ret = media_entity_pads_init(&priv->subdev.entity, 1, &priv->pad);
-	if (ret < 0)
-		return ret;
+	imx219->sd.ctrl_handler = &imx219->ctrls;
+	mutex_init(&imx219->mutex);
+	imx219->ctrls.lock = &imx219->mutex;
 
-	ret = v4l2_async_register_subdev(&priv->subdev);
+	imx219->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
+	imx219->pad.flags = MEDIA_PAD_FL_SOURCE;
+	imx219->sd.dev = &client->dev;
+	imx219->sd.entity.function = MEDIA_ENT_F_CAM_SENSOR;
+
+	ret = media_entity_pads_init(&imx219->sd.entity, 1, &imx219->pad);
 	if (ret < 0)
-		return ret;
+		goto err_mutexdestroy;
+
+	pm_runtime_set_active(imx219->dev);
+	pm_runtime_enable(imx219->dev);
+	pm_runtime_idle(imx219->dev);
+
+	ret = v4l2_async_register_subdev_sensor_common(&imx219->sd);
+	if (ret < 0)
+		goto err_v4lsubdev;
+
+	return ret;
+
+err_v4lsubdev:
+	media_entity_cleanup(&imx219->sd.entity);
+	v4l2_ctrl_handler_free(&imx219->ctrls);
+	pm_runtime_disable(&client->dev);
+	pm_runtime_set_suspended(&client->dev);
+err_mutexdestroy:
+	mutex_destroy(&imx219->mutex);
+err_powerdown:
+	imx219_power_off(imx219->dev);
 
 	return ret;
 }
 
 static int imx219_remove(struct i2c_client *client)
 {
-	struct imx219 *priv = to_imx219(client);
+	struct v4l2_subdev *sd = i2c_get_clientdata(client);
+	struct imx219 *imx219 = to_imx219(sd);
 
-	v4l2_async_unregister_subdev(&priv->subdev);
-	media_entity_cleanup(&priv->subdev.entity);
-	v4l2_ctrl_handler_free(&priv->ctrl_handler);
+	v4l2_async_unregister_subdev(&imx219->sd);
+	media_entity_cleanup(&imx219->sd.entity);
+	v4l2_ctrl_handler_free(&imx219->ctrls);
+
+	pm_runtime_disable(&client->dev);
+	pm_runtime_set_suspended(&client->dev);
+	mutex_destroy(&imx219->mutex);
 
 	return 0;
 }
@@ -996,8 +1241,9 @@ MODULE_DEVICE_TABLE(of, imx219_of_match);
 
 static struct i2c_driver imx219_i2c_driver = {
 	.driver = {
-		.of_match_table = of_match_ptr(imx219_of_match),
 		.name = "imx219",
+		.pm = &imx219_pm_ops,
+		.of_match_table = of_match_ptr(imx219_of_match),
 	},
 	.probe = imx219_probe,
 	.remove = imx219_remove,
