@@ -368,6 +368,9 @@ static struct clk_core *clk_core_get(struct clk_core *core, u8 p_index)
 	const char *dev_id = dev ? dev_name(dev) : NULL;
 	struct device_node *np = core->of_node;
 
+	if (!name)
+		name = core->parents[p_index].name;
+
 	if (np && index >= 0)
 		hw = of_clk_get_hw(np, index, name);
 
