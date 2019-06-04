@@ -180,8 +180,10 @@ static int rkisp1_pipeline_set_stream(struct rkisp1_pipeline *p, bool on)
 	/* phy -> sensor */
 	for (i = 0; i < p->num_subdevs; ++i) {
 		ret = v4l2_subdev_call(p->subdevs[i], video, s_stream, on);
-		if (on && ret < 0 && ret != -ENOIOCTLCMD && ret != -ENODEV)
+		if (on && ret < 0 && ret != -ENOIOCTLCMD && ret != -ENODEV) {
+			v4l2_err(&dev->v4l2_dev, "subdev %s s_stream failed %d\n", p->subdevs[i]->name, ret);
 			goto err_stream_off;
+		}
 	}
 
 	if (!on)
