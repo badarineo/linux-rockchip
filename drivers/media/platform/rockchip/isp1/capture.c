@@ -1238,8 +1238,10 @@ rkisp1_start_streaming(struct vb2_queue *queue, unsigned int count)
 
 	/* start sub-devices */
 	ret = dev->pipe.set_stream(&dev->pipe, true);
-	if (ret < 0)
+	if (ret < 0) {
+		v4l2_err(v4l2_dev, "pipeline stream-on failed %d\n", ret);
 		goto stop_stream;
+	}
 
 	ret = media_pipeline_start(&node->vdev.entity, &dev->pipe.pipe);
 	if (ret < 0) {
