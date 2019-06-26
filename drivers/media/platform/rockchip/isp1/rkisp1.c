@@ -1177,6 +1177,7 @@ void rkisp1_mipi_isr(unsigned int mis, struct rkisp1_device *dev)
 	u32 val;
 
 	writel(~0, base + CIF_MIPI_ICR);
+printk("%s: 0x%x\n", __func__, mis);
 
 	/*
 	 * Disable DPHY errctrl interrupt, because this dphy

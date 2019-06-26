@@ -1506,6 +1506,15 @@ static const char *const rk3399_cru_critical_clocks[] __initconst = {
 	"gpll_aclk_perihp_src",
 	"aclk_vio_noc",
 
+/* "pclk_mipi_dsi0",
+"pclk_mipi_dsi1",
+"clk_dphy_tx0_cfg",
+"clk_dphy_pll", */
+/*	"aclk_isp0_noc",
+	"hclk_isp0_noc",
+	"aclk_isp1_noc",
+	"hclk_isp1_noc", */
+
 	/* ddrc */
 	"sclk_ddrc"
 };

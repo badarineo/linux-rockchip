@@ -296,6 +296,8 @@ static int rockchip_pd_power(struct rockchip_pm_domain *pd, bool power_on)
 	struct rockchip_pmu *pmu = pd->pmu;
 	int ret;
 
+if (!power_on)
+return 0;
 	mutex_lock(&pmu->mutex);
 
 	if (rockchip_pmu_domain_is_on(pd) != power_on) {
