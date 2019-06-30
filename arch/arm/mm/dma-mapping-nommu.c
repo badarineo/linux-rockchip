@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  Based on linux/arch/arm/mm/dma-mapping.c
  *
  *  Copyright (C) 2000-2004 Russell King
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 
 #include <linux/export.h>
@@ -22,7 +18,7 @@
 #include "dma.h"
 
 /*
- *  dma_direct_ops is used if
+ *  The generic direct mapping code is used if
  *   - MMU/MPU is off
  *   - cpu is v7m w/o cache support
  *   - device is coherent
@@ -209,16 +205,9 @@ const struct dma_map_ops arm_nommu_dma_ops = {
 };
 EXPORT_SYMBOL(arm_nommu_dma_ops);
 
-static const struct dma_map_ops *arm_nommu_get_dma_map_ops(bool coherent)
-{
-	return coherent ? &dma_direct_ops : &arm_nommu_dma_ops;
-}
-
 void arch_setup_dma_ops(struct device *dev, u64 dma_base, u64 size,
 			const struct iommu_ops *iommu, bool coherent)
 {
-	const struct dma_map_ops *dma_ops;
-
 	if (IS_ENABLED(CONFIG_CPU_V7M)) {
 		/*
 		 * Cache support for v7m is optional, so can be treated as
@@ -234,7 +223,6 @@ void arch_setup_dma_ops(struct device *dev, u64 dma_base, u64 size,
 		dev->archdata.dma_coherent = (get_cr() & CR_M) ? coherent : true;
 	}
 
-	dma_ops = arm_nommu_get_dma_map_ops(dev->archdata.dma_coherent);
-
-	set_dma_ops(dev, dma_ops);
+	if (!dev->archdata.dma_coherent)
+		set_dma_ops(dev, &arm_nommu_dma_ops);
 }

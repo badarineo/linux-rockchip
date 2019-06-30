@@ -531,6 +531,8 @@ static int drm_atomic_plane_check(const struct drm_plane_state *old_plane_state,
 	struct drm_crtc *crtc = new_plane_state->crtc;
 	const struct drm_framebuffer *fb = new_plane_state->fb;
 	unsigned int fb_width, fb_height;
+	struct drm_mode_rect *clips;
+	uint32_t num_clips;
 	int ret;
 
 	/* either *both* CRTC and FB must be set, or neither */
@@ -602,6 +604,26 @@ static int drm_atomic_plane_check(const struct drm_plane_state *old_plane_state,
 				 ((new_plane_state->src_y & 0xffff) * 15625) >> 10,
 				 fb->width, fb->height);
 		return -ENOSPC;
+	}
+
+	clips = drm_plane_get_damage_clips(new_plane_state);
+	num_clips = drm_plane_get_damage_clips_count(new_plane_state);
+
+	/* Make sure damage clips are valid and inside the fb. */
+	while (num_clips > 0) {
+		if (clips->x1 >= clips->x2 ||
+		    clips->y1 >= clips->y2 ||
+		    clips->x1 < 0 ||
+		    clips->y1 < 0 ||
+		    clips->x2 > fb_width ||
+		    clips->y2 > fb_height) {
+			DRM_DEBUG_ATOMIC("[PLANE:%d:%s] invalid damage clip %d %d %d %d\n",
+					 plane->base.id, plane->name, clips->x1,
+					 clips->y1, clips->x2, clips->y2);
+			return -EINVAL;
+		}
+		clips++;
+		num_clips--;
 	}
 
 	if (plane_switching_crtc(old_plane_state, new_plane_state)) {
@@ -676,6 +698,7 @@ static void drm_atomic_plane_print_state(struct drm_printer *p,
 
 /**
  * drm_atomic_private_obj_init - initialize private object
+ * @dev: DRM device this object will be attached to
  * @obj: private object
  * @state: initial private object state
  * @funcs: pointer to the struct of function pointers that identify the object
@@ -685,14 +708,18 @@ static void drm_atomic_plane_print_state(struct drm_printer *p,
  * driver private object that needs its own atomic state.
  */
 void
-drm_atomic_private_obj_init(struct drm_private_obj *obj,
+drm_atomic_private_obj_init(struct drm_device *dev,
+			    struct drm_private_obj *obj,
 			    struct drm_private_state *state,
 			    const struct drm_private_state_funcs *funcs)
 {
 	memset(obj, 0, sizeof(*obj));
 
+	drm_modeset_lock_init(&obj->lock);
+
 	obj->state = state;
 	obj->funcs = funcs;
+	list_add_tail(&obj->head, &dev->mode_config.privobj_list);
 }
 EXPORT_SYMBOL(drm_atomic_private_obj_init);
 
@@ -705,7 +732,9 @@ EXPORT_SYMBOL(drm_atomic_private_obj_init);
 void
 drm_atomic_private_obj_fini(struct drm_private_obj *obj)
 {
+	list_del(&obj->head);
 	obj->funcs->atomic_destroy_state(obj, obj->state);
+	drm_modeset_lock_fini(&obj->lock);
 }
 EXPORT_SYMBOL(drm_atomic_private_obj_fini);
 
@@ -715,8 +744,8 @@ EXPORT_SYMBOL(drm_atomic_private_obj_fini);
  * @obj: private object to get the state for
  *
  * This function returns the private object state for the given private object,
- * allocating the state if needed. It does not grab any locks as the caller is
- * expected to care of any required locking.
+ * allocating the state if needed. It will also grab the relevant private
+ * object lock to make sure that the state is consistent.
  *
  * RETURNS:
  *
@@ -726,7 +755,7 @@ struct drm_private_state *
 drm_atomic_get_private_obj_state(struct drm_atomic_state *state,
 				 struct drm_private_obj *obj)
 {
-	int index, num_objs, i;
+	int index, num_objs, i, ret;
 	size_t size;
 	struct __drm_private_objs_state *arr;
 	struct drm_private_state *obj_state;
@@ -734,6 +763,10 @@ drm_atomic_get_private_obj_state(struct drm_atomic_state *state,
 	for (i = 0; i < state->num_private_objs; i++)
 		if (obj == state->private_objs[i].ptr)
 			return state->private_objs[i].state;
+
+	ret = drm_modeset_lock(&obj->lock, state->acquire_ctx);
+	if (ret)
+		return ERR_PTR(ret);
 
 	num_objs = state->num_private_objs + 1;
 	size = sizeof(*state->private_objs) * num_objs;
@@ -763,6 +796,50 @@ drm_atomic_get_private_obj_state(struct drm_atomic_state *state,
 	return obj_state;
 }
 EXPORT_SYMBOL(drm_atomic_get_private_obj_state);
+
+/**
+ * drm_atomic_get_old_private_obj_state
+ * @state: global atomic state object
+ * @obj: private_obj to grab
+ *
+ * This function returns the old private object state for the given private_obj,
+ * or NULL if the private_obj is not part of the global atomic state.
+ */
+struct drm_private_state *
+drm_atomic_get_old_private_obj_state(struct drm_atomic_state *state,
+				     struct drm_private_obj *obj)
+{
+	int i;
+
+	for (i = 0; i < state->num_private_objs; i++)
+		if (obj == state->private_objs[i].ptr)
+			return state->private_objs[i].old_state;
+
+	return NULL;
+}
+EXPORT_SYMBOL(drm_atomic_get_old_private_obj_state);
+
+/**
+ * drm_atomic_get_new_private_obj_state
+ * @state: global atomic state object
+ * @obj: private_obj to grab
+ *
+ * This function returns the new private object state for the given private_obj,
+ * or NULL if the private_obj is not part of the global atomic state.
+ */
+struct drm_private_state *
+drm_atomic_get_new_private_obj_state(struct drm_atomic_state *state,
+				     struct drm_private_obj *obj)
+{
+	int i;
+
+	for (i = 0; i < state->num_private_objs; i++)
+		if (obj == state->private_objs[i].ptr)
+			return state->private_objs[i].new_state;
+
+	return NULL;
+}
+EXPORT_SYMBOL(drm_atomic_get_new_private_obj_state);
 
 /**
  * drm_atomic_get_connector_state - get connector state
@@ -1203,4 +1280,3 @@ int drm_atomic_debugfs_init(struct drm_minor *minor)
 			minor->debugfs_root, minor);
 }
 #endif
-

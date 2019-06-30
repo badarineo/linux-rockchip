@@ -48,7 +48,6 @@
 #define VMWGFX_DRIVER_MAJOR 2
 #define VMWGFX_DRIVER_MINOR 15
 #define VMWGFX_DRIVER_PATCHLEVEL 0
-#define VMWGFX_FILE_PAGE_OFFSET 0x00100000
 #define VMWGFX_FIFO_STATIC_SIZE (1024*1024)
 #define VMWGFX_MAX_RELOCATIONS 2048
 #define VMWGFX_MAX_VALIDATIONS 2048
@@ -297,7 +296,7 @@ struct vmw_sg_table {
 struct vmw_piter {
 	struct page **pages;
 	const dma_addr_t *addrs;
-	struct sg_page_iter iter;
+	struct sg_dma_page_iter iter;
 	unsigned long i;
 	unsigned long num_pages;
 	bool (*next)(struct vmw_piter *);
@@ -466,15 +465,6 @@ struct vmw_private {
 	uint32_t num_displays;
 
 	/*
-	 * Currently requested_layout_mutex is used to protect the gui
-	 * positionig state in display unit. With that use case currently this
-	 * mutex is only taken during layout ioctl and atomic check_modeset.
-	 * Other display unit state can be protected with this mutex but that
-	 * needs careful consideration.
-	 */
-	struct mutex requested_layout_mutex;
-
-	/*
 	 * Framebuffer info.
 	 */
 
@@ -484,8 +474,6 @@ struct vmw_private {
 	struct vmw_overlay *overlay_priv;
 	struct drm_property *hotplug_mode_update_property;
 	struct drm_property *implicit_placement_property;
-	unsigned num_implicit;
-	struct vmw_framebuffer *implicit_fb;
 	struct mutex global_kms_state_mutex;
 	spinlock_t cursor_lock;
 	struct drm_atomic_state *suspend_state;
@@ -711,6 +699,8 @@ extern int vmw_user_stream_lookup(struct vmw_private *dev_priv,
 				  uint32_t *inout_id,
 				  struct vmw_resource **out);
 extern void vmw_resource_unreserve(struct vmw_resource *res,
+				   bool dirty_set,
+				   bool dirty,
 				   bool switch_backup,
 				   struct vmw_buffer_object *new_backup,
 				   unsigned long new_backup_offset);
@@ -823,7 +813,6 @@ extern int vmw_fifo_init(struct vmw_private *dev_priv,
 			 struct vmw_fifo_state *fifo);
 extern void vmw_fifo_release(struct vmw_private *dev_priv,
 			     struct vmw_fifo_state *fifo);
-extern void *vmw_fifo_reserve(struct vmw_private *dev_priv, uint32_t bytes);
 extern void *
 vmw_fifo_reserve_dx(struct vmw_private *dev_priv, uint32_t bytes, int ctx_id);
 extern void vmw_fifo_commit(struct vmw_private *dev_priv, uint32_t bytes);
@@ -838,6 +827,18 @@ extern int vmw_fifo_emit_dummy_query(struct vmw_private *dev_priv,
 				     uint32_t cid);
 extern int vmw_fifo_flush(struct vmw_private *dev_priv,
 			  bool interruptible);
+
+#define VMW_FIFO_RESERVE_DX(__priv, __bytes, __ctx_id)                        \
+({                                                                            \
+	vmw_fifo_reserve_dx(__priv, __bytes, __ctx_id) ? : ({                 \
+		DRM_ERROR("FIFO reserve failed at %s for %u bytes\n",         \
+			  __func__, (unsigned int) __bytes);                  \
+		NULL;                                                         \
+	});                                                                   \
+})
+
+#define VMW_FIFO_RESERVE(__priv, __bytes)                                     \
+	VMW_FIFO_RESERVE_DX(__priv, __bytes, SVGA3D_INVALID_ID)
 
 /**
  * TTM glue - vmwgfx_ttm_glue.c
@@ -1323,6 +1324,20 @@ int vmw_host_get_guestinfo(const char *guest_info_param,
 			   char *buffer, size_t *length);
 int vmw_host_log(const char *log);
 
+/* VMW logging */
+
+/**
+ * VMW_DEBUG_USER - Debug output for user-space debugging.
+ *
+ * @fmt: printf() like format string.
+ *
+ * This macro is for logging user-space error and debugging messages for e.g.
+ * command buffer execution errors due to malformed commands, invalid context,
+ * etc.
+ */
+#define VMW_DEBUG_USER(fmt, ...)                                              \
+	DRM_DEBUG_DRIVER(fmt, ##__VA_ARGS__)
+
 /**
  * Inline helper functions
  */
@@ -1348,18 +1363,15 @@ static inline void vmw_bo_unreference(struct vmw_buffer_object **buf)
 
 	*buf = NULL;
 	if (tmp_buf != NULL) {
-		struct ttm_buffer_object *bo = &tmp_buf->base;
-
-		ttm_bo_unref(&bo);
+		ttm_bo_put(&tmp_buf->base);
 	}
 }
 
 static inline struct vmw_buffer_object *
 vmw_bo_reference(struct vmw_buffer_object *buf)
 {
-	if (ttm_bo_reference(&buf->base))
-		return buf;
-	return NULL;
+	ttm_bo_get(&buf->base);
+	return buf;
 }
 
 static inline struct ttm_mem_global *vmw_mem_glob(struct vmw_private *dev_priv)

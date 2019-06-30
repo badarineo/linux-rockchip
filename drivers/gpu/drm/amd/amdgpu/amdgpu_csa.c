@@ -43,7 +43,7 @@ int amdgpu_allocate_static_csa(struct amdgpu_device *adev, struct amdgpu_bo **bo
 	r = amdgpu_bo_create_kernel(adev, size, PAGE_SIZE,
 				domain, bo,
 				NULL, &ptr);
-	if (!bo)
+	if (!*bo)
 		return -ENOMEM;
 
 	memset(ptr, 0, size);
@@ -74,7 +74,7 @@ int amdgpu_map_static_csa(struct amdgpu_device *adev, struct amdgpu_vm *vm,
 	INIT_LIST_HEAD(&list);
 	INIT_LIST_HEAD(&csa_tv.head);
 	csa_tv.bo = &bo->tbo;
-	csa_tv.shared = true;
+	csa_tv.num_shared = 1;
 
 	list_add(&csa_tv.head, &list);
 	amdgpu_vm_get_pd_bo(vm, &list, &pd);
@@ -90,15 +90,6 @@ int amdgpu_map_static_csa(struct amdgpu_device *adev, struct amdgpu_vm *vm,
 		ttm_eu_backoff_reservation(&ticket, &list);
 		DRM_ERROR("failed to create bo_va for static CSA\n");
 		return -ENOMEM;
-	}
-
-	r = amdgpu_vm_alloc_pts(adev, (*bo_va)->base.vm, csa_addr,
-				size);
-	if (r) {
-		DRM_ERROR("failed to allocate pts for static CSA, err=%d\n", r);
-		amdgpu_vm_bo_rmv(adev, *bo_va);
-		ttm_eu_backoff_reservation(&ticket, &list);
-		return r;
 	}
 
 	r = amdgpu_vm_bo_map(adev, *bo_va, csa_addr, 0, size,

@@ -84,6 +84,18 @@ struct dm_comressor_info {
 };
 
 /**
+ * struct amdgpu_dm_backlight_caps - Usable range of backlight values from ACPI
+ * @min_input_signal: minimum possible input in range 0-255
+ * @max_input_signal: maximum possible input in range 0-255
+ * @caps_valid: true if these values are from the ACPI interface
+ */
+struct amdgpu_dm_backlight_caps {
+	int min_input_signal;
+	int max_input_signal;
+	bool caps_valid;
+};
+
+/**
  * struct amdgpu_display_manager - Central amdgpu display manager device
  *
  * @dc: Display Core control structure
@@ -110,6 +122,23 @@ struct amdgpu_display_manager {
 	struct amdgpu_device *adev;
 	struct drm_device *ddev;
 	u16 display_indexes_num;
+
+	/**
+	 * @atomic_obj
+	 *
+	 * In combination with &dm_atomic_state it helps manage
+	 * global atomic state that doesn't map cleanly into existing
+	 * drm resources, like &dc_context.
+	 */
+	struct drm_private_obj atomic_obj;
+
+	/**
+	 * @dc_lock:
+	 *
+	 * Guards access to DC functions that can issue register write
+	 * sequences.
+	 */
+	struct mutex dc_lock;
 
 	/**
 	 * @irq_handler_list_low_tab:
@@ -153,11 +182,21 @@ struct amdgpu_display_manager {
 	struct common_irq_params
 	vblank_params[DC_IRQ_SOURCE_VBLANK6 - DC_IRQ_SOURCE_VBLANK1 + 1];
 
+	/**
+	 * @vupdate_params:
+	 *
+	 * Vertical update IRQ parameters, passed to registered handlers when
+	 * triggered.
+	 */
+	struct common_irq_params
+	vupdate_params[DC_IRQ_SOURCE_VUPDATE6 - DC_IRQ_SOURCE_VUPDATE1 + 1];
+
 	spinlock_t irq_handler_list_table_lock;
 
 	struct backlight_device *backlight_dev;
 
 	const struct dc_link *backlight_link;
+	struct amdgpu_dm_backlight_caps backlight_caps;
 
 	struct mod_freesync *freesync_module;
 
@@ -208,6 +247,10 @@ struct amdgpu_dm_connector {
 	struct mutex hpd_lock;
 
 	bool fake_enable;
+#ifdef CONFIG_DEBUG_FS
+	uint32_t debugfs_dpcd_address;
+	uint32_t debugfs_dpcd_size;
+#endif
 };
 
 #define to_amdgpu_dm_connector(x) container_of(x, struct amdgpu_dm_connector, base)
@@ -228,18 +271,27 @@ struct dm_crtc_state {
 	struct drm_crtc_state base;
 	struct dc_stream_state *stream;
 
+	int active_planes;
+	bool interrupts_enabled;
+
 	int crc_skip_count;
 	bool crc_enabled;
 
-	bool freesync_enabled;
-	struct dc_crtc_timing_adjust adjust;
+	bool freesync_timing_changed;
+	bool freesync_vrr_info_changed;
+
+	bool vrr_supported;
+	struct mod_freesync_config freesync_config;
+	struct mod_vrr_params vrr_params;
 	struct dc_info_packet vrr_infopacket;
+
+	int abm_level;
 };
 
 #define to_dm_crtc_state(x) container_of(x, struct dm_crtc_state, base)
 
 struct dm_atomic_state {
-	struct drm_atomic_state base;
+	struct drm_private_state base;
 
 	struct dc_state *context;
 };
@@ -254,8 +306,8 @@ struct dm_connector_state {
 	uint8_t underscan_hborder;
 	uint8_t max_bpc;
 	bool underscan_enable;
-	bool freesync_enable;
 	bool freesync_capable;
+	uint8_t abm_level;
 };
 
 #define to_dm_connector_state(x)\

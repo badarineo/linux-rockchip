@@ -248,6 +248,8 @@ int amdgpu_ring_init(struct amdgpu_device *adev, struct amdgpu_ring *ring,
 	 */
 	if (ring->funcs->type == AMDGPU_RING_TYPE_KIQ)
 		sched_hw_submission = max(sched_hw_submission, 256);
+	else if (ring == &adev->sdma.instance[0].page)
+		sched_hw_submission = 256;
 
 	if (ring->adev == NULL) {
 		if (adev->num_rings >= AMDGPU_MAX_RINGS)
@@ -397,7 +399,7 @@ bool amdgpu_ring_soft_recovery(struct amdgpu_ring *ring, unsigned int vmid,
 {
 	ktime_t deadline = ktime_add_us(ktime_get(), 10000);
 
-	if (!ring->funcs->soft_recovery)
+	if (!ring->funcs->soft_recovery || !fence)
 		return false;
 
 	atomic_inc(&ring->adev->gpu_reset_counter);

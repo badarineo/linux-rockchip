@@ -250,7 +250,7 @@ int amdgpu_gfx_kiq_init_ring(struct amdgpu_device *adev,
 	ring->adev = NULL;
 	ring->ring_obj = NULL;
 	ring->use_doorbell = true;
-	ring->doorbell_index = AMDGPU_DOORBELL_KIQ;
+	ring->doorbell_index = adev->doorbell_index.kiq;
 
 	r = amdgpu_gfx_kiq_acquire(adev, ring);
 	if (r)
@@ -390,7 +390,7 @@ void amdgpu_gfx_compute_mqd_sw_fini(struct amdgpu_device *adev)
 
 void amdgpu_gfx_off_ctrl(struct amdgpu_device *adev, bool enable)
 {
-	if (!(adev->powerplay.pp_feature & PP_GFXOFF_MASK))
+	if (!(adev->pm.pp_feature & PP_GFXOFF_MASK))
 		return;
 
 	if (!adev->powerplay.pp_funcs || !adev->powerplay.pp_funcs->set_powergating_by_smu)

@@ -30,6 +30,8 @@
  * interface to PPLIB/SMU to setup clocks and pstate requirements on SoC
  */
 
+typedef bool BOOLEAN;
+
 enum pp_smu_ver {
 	/*
 	 * PP_SMU_INTERFACE_X should be interpreted as the interface defined
@@ -38,7 +40,8 @@ enum pp_smu_ver {
 	 * of interface sharing between families of ASIcs.
 	 */
 	PP_SMU_UNSUPPORTED,
-	PP_SMU_VER_RV
+	PP_SMU_VER_RV,
+	PP_SMU_VER_MAX
 };
 
 struct pp_smu {
@@ -71,29 +74,6 @@ struct pp_smu_wm_range_sets {
 	struct pp_smu_wm_set_range writer_wm_sets[MAX_WATERMARK_SETS];
 };
 
-struct pp_smu_display_requirement_rv {
-	/* PPSMC_MSG_SetDisplayCount: count
-	 *  0 triggers S0i2 optimization
-	 */
-	unsigned int display_count;
-
-	/* PPSMC_MSG_SetHardMinFclkByFreq: mhz
-	 *  FCLK will vary with DPM, but never below requested hard min
-	 */
-	unsigned int hard_min_fclk_mhz;
-
-	/* PPSMC_MSG_SetHardMinDcefclkByFreq: mhz
-	 *  fixed clock at requested freq, either from FCH bypass or DFS
-	 */
-	unsigned int hard_min_dcefclk_mhz;
-
-	/* PPSMC_MSG_SetMinDeepSleepDcefclk: mhz
-	 *  when DF is in cstate, dcf clock is further divided down
-	 *  to just above given frequency
-	 */
-	unsigned int min_deep_sleep_dcefclk_mhz;
-};
-
 struct pp_smu_funcs_rv {
 	struct pp_smu pp_smu;
 
@@ -102,7 +82,7 @@ struct pp_smu_funcs_rv {
 	 */
 	void (*set_display_count)(struct pp_smu *pp, int count);
 
-	/* which SMU message?  are reader and writer WM separate SMU msg? */
+	/* reader and writer WM's are sent together as part of one table*/
 	/*
 	 * PPSMC_MSG_SetDriverDramAddrHigh
 	 * PPSMC_MSG_SetDriverDramAddrLow
@@ -136,12 +116,6 @@ struct pp_smu_funcs_rv {
 	/* PME w/a */
 	void (*set_pme_wa_enable)(struct pp_smu *pp);
 
-	/*
-	 * Legacy functions.  Used for backwards comp. with existing
-	 * PPlib code.
-	 */
-	void (*set_display_requirement)(struct pp_smu *pp,
-			struct pp_smu_display_requirement_rv *req);
 };
 
 struct pp_smu_funcs {

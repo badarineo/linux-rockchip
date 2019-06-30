@@ -24,15 +24,15 @@
  *
  */
 
-#include <drm/drmP.h>
 #include <drm/drm_crtc.h>
 #include <drm/drm_edid.h>
 #include <drm/i915_drm.h>
 #include <linux/gpio/consumer.h>
+#include <linux/mfd/intel_soc_pmic.h>
 #include <linux/slab.h>
 #include <video/mipi_display.h>
 #include <asm/intel-mid.h>
-#include <video/mipi_display.h>
+#include <asm/unaligned.h>
 #include "i915_drv.h"
 #include "intel_drv.h"
 #include "intel_dsi.h"
@@ -102,6 +102,18 @@ static struct gpio_map vlv_gpio_table[] = {
 
 #define CHV_GPIO_PAD_CFG1(f, i)		(0x4400 + (f) * 0x400 + (i) * 8 + 4)
 #define  CHV_GPIO_CFGLOCK		(1 << 31)
+
+/* ICL DSI Display GPIO Pins */
+#define  ICL_GPIO_DDSP_HPD_A		0
+#define  ICL_GPIO_L_VDDEN_1		1
+#define  ICL_GPIO_L_BKLTEN_1		2
+#define  ICL_GPIO_DDPA_CTRLCLK_1	3
+#define  ICL_GPIO_DDPA_CTRLDATA_1	4
+#define  ICL_GPIO_DDSP_HPD_B		5
+#define  ICL_GPIO_L_VDDEN_2		6
+#define  ICL_GPIO_L_BKLTEN_2		7
+#define  ICL_GPIO_DDPA_CTRLCLK_2	8
+#define  ICL_GPIO_DDPA_CTRLDATA_2	9
 
 static inline enum port intel_dsi_seq_port_to_port(u8 port)
 {
@@ -182,7 +194,7 @@ static const u8 *mipi_exec_send_packet(struct intel_dsi *intel_dsi,
 		break;
 	}
 
-	if (!IS_ICELAKE(dev_priv))
+	if (INTEL_GEN(dev_priv) < 11)
 		vlv_dsi_wait_for_fifo_empty(intel_dsi, port);
 
 out:
@@ -324,6 +336,12 @@ static void bxt_exec_gpio(struct drm_i915_private *dev_priv,
 	gpiod_set_value(gpio_desc, value);
 }
 
+static void icl_exec_gpio(struct drm_i915_private *dev_priv,
+			  u8 gpio_source, u8 gpio_index, bool value)
+{
+	DRM_DEBUG_KMS("Skipping ICL GPIO element execution\n");
+}
+
 static const u8 *mipi_exec_gpio(struct intel_dsi *intel_dsi, const u8 *data)
 {
 	struct drm_device *dev = intel_dsi->base.base.dev;
@@ -347,7 +365,9 @@ static const u8 *mipi_exec_gpio(struct intel_dsi *intel_dsi, const u8 *data)
 	/* pull up/down */
 	value = *data++ & 1;
 
-	if (IS_VALLEYVIEW(dev_priv))
+	if (INTEL_GEN(dev_priv) >= 11)
+		icl_exec_gpio(dev_priv, gpio_source, gpio_index, value);
+	else if (IS_VALLEYVIEW(dev_priv))
 		vlv_exec_gpio(dev_priv, gpio_source, gpio_number, value);
 	else if (IS_CHERRYVIEW(dev_priv))
 		chv_exec_gpio(dev_priv, gpio_source, gpio_number, value);
@@ -373,7 +393,25 @@ static const u8 *mipi_exec_spi(struct intel_dsi *intel_dsi, const u8 *data)
 
 static const u8 *mipi_exec_pmic(struct intel_dsi *intel_dsi, const u8 *data)
 {
-	DRM_DEBUG_KMS("Skipping PMIC element execution\n");
+#ifdef CONFIG_PMIC_OPREGION
+	u32 value, mask, reg_address;
+	u16 i2c_address;
+	int ret;
+
+	/* byte 0 aka PMIC Flag is reserved */
+	i2c_address	= get_unaligned_le16(data + 1);
+	reg_address	= get_unaligned_le32(data + 3);
+	value		= get_unaligned_le32(data + 7);
+	mask		= get_unaligned_le32(data + 11);
+
+	ret = intel_soc_pmic_exec_mipi_pmic_seq_element(i2c_address,
+							reg_address,
+							value, mask);
+	if (ret)
+		DRM_ERROR("%s failed, error: %d\n", __func__, ret);
+#else
+	DRM_ERROR("Your hardware requires CONFIG_PMIC_OPREGION and it is not set\n");
+#endif
 
 	return data + 15;
 }
@@ -492,24 +530,6 @@ void intel_dsi_msleep(struct intel_dsi *intel_dsi, int msec)
 		return;
 
 	msleep(msec);
-}
-
-int intel_dsi_vbt_get_modes(struct intel_dsi *intel_dsi)
-{
-	struct intel_connector *connector = intel_dsi->attached_connector;
-	struct drm_device *dev = intel_dsi->base.base.dev;
-	struct drm_i915_private *dev_priv = to_i915(dev);
-	struct drm_display_mode *mode;
-
-	mode = drm_mode_duplicate(dev, dev_priv->vbt.lfp_lvds_vbt_mode);
-	if (!mode)
-		return 0;
-
-	mode->type |= DRM_MODE_TYPE_PREFERRED;
-
-	drm_mode_probed_add(&connector->base, mode);
-
-	return 1;
 }
 
 #define ICL_PREPARE_CNT_MAX	0x7
@@ -833,6 +853,17 @@ bool intel_dsi_vbt_init(struct intel_dsi *intel_dsi, u16 panel_id)
 		if (mipi_config->target_burst_mode_freq) {
 			u32 bitrate = intel_dsi_bitrate(intel_dsi);
 
+			/*
+			 * Sometimes the VBT contains a slightly lower clock,
+			 * then the bitrate we have calculated, in this case
+			 * just replace it with the calculated bitrate.
+			 */
+			if (mipi_config->target_burst_mode_freq < bitrate &&
+			    intel_fuzzy_clock_check(
+					mipi_config->target_burst_mode_freq,
+					bitrate))
+				mipi_config->target_burst_mode_freq = bitrate;
+
 			if (mipi_config->target_burst_mode_freq < bitrate) {
 				DRM_ERROR("Burst mode freq is less than computed\n");
 				return false;
@@ -852,7 +883,7 @@ bool intel_dsi_vbt_init(struct intel_dsi *intel_dsi, u16 panel_id)
 
 	intel_dsi->burst_mode_ratio = burst_mode_ratio;
 
-	if (IS_ICELAKE(dev_priv))
+	if (INTEL_GEN(dev_priv) >= 11)
 		icl_dphy_param_init(intel_dsi);
 	else
 		vlv_dphy_param_init(intel_dsi);

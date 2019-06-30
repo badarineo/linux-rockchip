@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * lib80211 crypt: host-based TKIP encryption implementation for lib80211
  *
  * Copyright (c) 2003-2004, Jouni Malinen <j@w1.fi>
  * Copyright (c) 2008, John W. Linville <linville@tuxdriver.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation. See README and COPYING for
- * more details.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -99,7 +95,7 @@ static void *lib80211_tkip_init(int key_idx)
 
 	priv->key_idx = key_idx;
 
-	priv->tx_tfm_arc4 = crypto_alloc_cipher("arc4", 0, CRYPTO_ALG_ASYNC);
+	priv->tx_tfm_arc4 = crypto_alloc_cipher("arc4", 0, 0);
 	if (IS_ERR(priv->tx_tfm_arc4)) {
 		priv->tx_tfm_arc4 = NULL;
 		goto fail;
@@ -111,7 +107,7 @@ static void *lib80211_tkip_init(int key_idx)
 		goto fail;
 	}
 
-	priv->rx_tfm_arc4 = crypto_alloc_cipher("arc4", 0, CRYPTO_ALG_ASYNC);
+	priv->rx_tfm_arc4 = crypto_alloc_cipher("arc4", 0, 0);
 	if (IS_ERR(priv->rx_tfm_arc4)) {
 		priv->rx_tfm_arc4 = NULL;
 		goto fail;
@@ -501,7 +497,6 @@ static int michael_mic(struct crypto_shash *tfm_michael, u8 *key, u8 *hdr,
 	}
 
 	desc->tfm = tfm_michael;
-	desc->flags = 0;
 
 	if (crypto_shash_setkey(tfm_michael, key, 8))
 		return -1;
