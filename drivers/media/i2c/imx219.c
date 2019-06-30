@@ -28,8 +28,8 @@
 
 
 /* Chip ID */
-#define IMX219_REG_CHIP_ID		0x0000
-#define IMX219_CHIP_ID			0x0219
+#define IMX219_MODEL_ID			0x0000
+/* #define IMX219_MODEL_ID_VAL		0x0219 */
 
 /* IMX219 supported geometry */
 #define IMX219_TABLE_END		0xffff
@@ -56,6 +56,8 @@ static const char * const imx219_supply_name[] = {
 };
 
 #define IMX219_NUM_SUPPLIES ARRAY_SIZE(imx219_supply_name)
+
+#define IMX219_DEFAULT_LINK_FREQ	456000000
 
 static const s64 link_freq_menu_items[] = {
 	456000000,
@@ -164,9 +166,6 @@ static const struct imx219_reg mode_table_common[] = {
 	{0x30EB, 0x05},		/* Access Code for address over 0x3000 */
 	{0x30EB, 0x09},		/* Access Code for address over 0x3000 */
 
-	{0x0114, 0x01},		/* CSI_LANE_MODE[1:0] */
-	{0x0128, 0x00},		/* DPHY_CNTRL */
-
 	{IMX219_TABLE_END, 0x00}
 };
 
@@ -215,6 +214,8 @@ struct imx219 {
 	struct regulator_bulk_data supplies[IMX219_NUM_SUPPLIES];
 	struct gpio_desc *enable_gpio;
 
+	u16 num_lanes;
+
 	struct v4l2_subdev sd;
 	struct media_pad pad;
 	struct v4l2_ctrl_handler ctrls;
@@ -235,7 +236,6 @@ struct imx219 {
 	struct v4l2_ctrl *pixel_rate;
 	const struct imx219_mode *cur_mode;
 	u16 cur_vts;
-
 
 	/*
 	 * Serialize control access, get/set format, get selection
@@ -390,6 +390,14 @@ static int imx219_power_off(struct device *dev)
 
 
 
+#define IMX219_CSI_LANE_MODE	0x0114
+#define IMX219_CSI_LANE_MODE_2	0x1
+#define IMX219_CSI_LANE_MODE_4	0x3
+
+#define IMX219_DPHY_CTRL	0x0128
+#define IMX219_DPHY_CTRL_AUTO	0x0
+#define IMX219_DPHY_CTRL_MANUAL	0x1
+
 #define IMX219_EXCK_FREQ_15_8	0x012a
 #define IMX219_EXCK_FREQ_7_0	0x012b
 
@@ -454,19 +462,29 @@ static int imx219_start_streaming(struct imx219 *imx219)
 
 	ret = imx219_setup_clock(imx219);
 	if (ret < 0) {
-		dev_err(&client->dev, "failed to setup clocks %d\n", ret);
+		dev_err(imx219->dev, "failed to setup clocks %d\n", ret);
 		goto error;
 	}
 
 	ret = imx219_write_table(imx219, mode_table_common);
 	if (ret) {
-		dev_err(&client->dev, "mode reg table failed %d\n", ret);
+		dev_err(imx219->dev, "mode reg table failed %d\n", ret);
 		goto error;
 	}
+dev_err(imx219->dev, "number of data lanes %d\n", imx219->num_lanes);
+	regmap_write(imx219->regmap, IMX219_CSI_LANE_MODE,
+		     imx219->num_lanes == 4 ? IMX219_CSI_LANE_MODE_4 :
+					      IMX219_CSI_LANE_MODE_2);
+
+	regmap_write(imx219->regmap, IMX219_DPHY_CTRL, IMX219_DPHY_CTRL_AUTO);
+
+/*	{0x0114, 0x01},*/		/* CSI_LANE_MODE[1:0] */
+/*	{0x0128, 0x00},*/		/* DPHY_CNTRL */
+
 
 	ret = imx219_write_table(imx219, imx219->cur_mode->reg_list);
 	if (ret) {
-		dev_err(&client->dev, "mode reg table failed %d\n", ret);
+		dev_err(imx219->dev, "mode reg table failed %d\n", ret);
 		goto error;
 	}
 
@@ -976,7 +994,7 @@ static int imx219_identify_module(struct imx219 *imx219)
 	u8 reg[2];
 	int ret;
 
-	ret = regmap_bulk_read(imx219->regmap, IMX219_REG_CHIP_ID, reg, 2);
+	ret = regmap_bulk_read(imx219->regmap, IMX219_MODEL_ID, reg, 2);
 	if (ret)
 		return ret;
 	model_id = reg[0] << 8 | reg[1];
@@ -1002,6 +1020,60 @@ static int imx219_get_regulators(struct imx219 *imx219)
 				       imx219->supplies);
 }
 
+static int imx219_parse_fwnode(struct imx219 *imx219)
+{
+	struct fwnode_handle *ep;
+	struct v4l2_fwnode_endpoint bus_cfg = {
+		.bus_type = V4L2_MBUS_CSI2_DPHY,
+	};
+	unsigned int i;
+	int ret;
+
+	ep = fwnode_graph_get_next_endpoint(dev_fwnode(imx219->dev), NULL);
+	if (!ep) {
+		dev_err(imx219->dev, "endpoint node not found\n");
+		return -EINVAL;
+	}
+
+	ret = v4l2_fwnode_endpoint_alloc_parse(ep, &bus_cfg);
+	if (ret) {
+		dev_err(imx219->dev, "parsing endpoint node failed\n");
+		goto done;
+	}
+
+	if (bus_cfg.bus_type != V4L2_MBUS_CSI2_DPHY ||
+	    bus_cfg.bus.mipi_csi2.num_data_lanes == 0 ||
+	    bus_cfg.nr_of_link_frequencies == 0) {
+		dev_err(imx219->dev, "missing CSI-2 properties in endpoint\n");
+		ret = -EINVAL;
+		goto done;
+	}
+
+	imx219->num_lanes = bus_cfg.bus.mipi_csi2.num_data_lanes;
+
+	if (imx219->num_lanes != 2 && imx219->num_lanes != 4) {
+		dev_err(imx219->dev, "invalid number of lanes\n");
+		ret = -EINVAL;
+		goto done;
+	}
+
+	for (i = 0; i < bus_cfg.nr_of_link_frequencies; i++)
+		if (bus_cfg.link_frequencies[i] == IMX219_DEFAULT_LINK_FREQ)
+			break;
+
+	if (i == bus_cfg.nr_of_link_frequencies) {
+		dev_err(imx219->dev, "link-frequencies %d not supported, Please review your DT\n",
+			IMX219_DEFAULT_LINK_FREQ);
+		ret = -EINVAL;
+		goto done;
+	}
+
+done:
+	v4l2_fwnode_endpoint_free(&bus_cfg);
+	fwnode_handle_put(ep);
+	return ret;
+}
+
 static int imx219_ctrls_init(struct v4l2_subdev *sd)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
@@ -1016,6 +1088,7 @@ static int imx219_ctrls_init(struct v4l2_subdev *sd)
 	v4l2_ctrl_new_std(&priv->ctrls, &imx219_ctrl_ops,
 			  V4L2_CID_VFLIP, 0, 1, 1, 0);
 
+printk("%s: exposure\n", __func__);
 	/* exposure */
 	v4l2_ctrl_new_std(&priv->ctrls, &imx219_ctrl_ops,
 			  V4L2_CID_ANALOGUE_GAIN,
@@ -1033,6 +1106,7 @@ static int imx219_ctrls_init(struct v4l2_subdev *sd)
 			  IMX219_DIGITAL_EXPOSURE_MAX, 1,
 			  IMX219_DIGITAL_EXPOSURE_DEFAULT);
 
+printk("%s: blank\n", __func__);
 	/* blank */
 	h_blank = mode->hts_def - mode->width;
 	priv->hblank = v4l2_ctrl_new_std(&priv->ctrls, NULL, V4L2_CID_HBLANK,
@@ -1041,6 +1115,7 @@ static int imx219_ctrls_init(struct v4l2_subdev *sd)
 	priv->vblank = v4l2_ctrl_new_std(&priv->ctrls, NULL, V4L2_CID_VBLANK,
 			  v_blank, v_blank, 1, v_blank);
 
+printk("%s: freq\n", __func__);
 	/* freq */
 	priv->link_freq = v4l2_ctrl_new_int_menu(&priv->ctrls, NULL,
 						V4L2_CID_LINK_FREQ,
@@ -1049,10 +1124,13 @@ static int imx219_ctrls_init(struct v4l2_subdev *sd)
 		priv->link_freq->flags |= V4L2_CTRL_FLAG_READ_ONLY;
 
 
+printk("%s: pixelrate\n", __func__);
 //	pixel_rate = mode->vts_def * mode->hts_def * mode->max_fps;
 	pixel_rate = link_freq_to_pixel_rate(link_freq_menu_items[0]);
+printk("%s: pixel_rate %ld <-> %ld\n",__func__, pixel_rate, mode->vts_def * mode->hts_def * mode->max_fps);
 	priv->pixel_rate = v4l2_ctrl_new_std(&priv->ctrls, NULL, V4L2_CID_PIXEL_RATE,
 			  0, pixel_rate, 1, pixel_rate);
+
 
 	v4l2_ctrl_new_std_menu_items(&priv->ctrls, &imx219_ctrl_ops,
 				     V4L2_CID_TEST_PATTERN,
@@ -1135,6 +1213,10 @@ static int imx219_probe(struct i2c_client *client,
 
 	imx219->dev = &client->dev;
 
+	ret = imx219_parse_fwnode(imx219);
+	if (ret)
+		return ret;
+
 	imx219->clk = devm_clk_get(&client->dev, NULL);
 	if (IS_ERR(imx219->clk)) {
 		dev_info(&client->dev, "Error %ld getting clock\n",
@@ -1177,6 +1259,7 @@ static int imx219_probe(struct i2c_client *client,
 	if (ret < 0)
 		goto err_powerdown;
 
+printk("%s: ctrls_init\n", __func__);
 	ret = imx219_ctrls_init(&imx219->sd);
 	if (ret < 0)
 		goto err_powerdown;
@@ -1190,6 +1273,7 @@ static int imx219_probe(struct i2c_client *client,
 	imx219->sd.dev = &client->dev;
 	imx219->sd.entity.function = MEDIA_ENT_F_CAM_SENSOR;
 
+printk("%s: media_init\n", __func__);
 	ret = media_entity_pads_init(&imx219->sd.entity, 1, &imx219->pad);
 	if (ret < 0)
 		goto err_mutexdestroy;
