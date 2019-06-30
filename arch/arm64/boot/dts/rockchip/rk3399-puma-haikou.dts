@@ -174,12 +174,12 @@
 		vdig-supply = <&vcc1v8_dragonfish>;
 
 		port {
-			csi1_out: endpoint {
-				remote-endpoint = <&csi1_ep1>;
+			cam_out: endpoint {
+				remote-endpoint = <&mipi_in_cam>;
 				clock-lanes = <0>;
 				data-lanes = <1 2 3 4>;
-				link-frequencies = /bits/ 64 <297000000>,
-						   /bits/ 64 <400000000>;
+				link-frequencies = /*/bits/ 64 <297000000>, */
+						   /bits/ 64 <456000000>;
 			};
 		};
 	};
@@ -198,8 +198,8 @@
 		reset-gpios = <&gpio4 RK_PD6 GPIO_ACTIVE_LOW>;
 
 		port {
-			csi1_out: endpoint {
-				remote-endpoint = <&csi1_ep1>;
+			cam_out: endpoint {
+				remote-endpoint = <&mipi_in_cam>;
 				clock-lanes = <0>;
 				data-lanes = <1 2 3 4>;
 			};
@@ -220,8 +220,8 @@
 		reset-gpios = <&gpio4 RK_PD6 GPIO_ACTIVE_LOW>;
 
 		port {
-			csi1_out: endpoint {
-				remote-endpoint = <&csi1_ep1>;
+			cam_out: endpoint {
+				remote-endpoint = <&mipi_in_cam>;
 				bus-type = <4>;
 				clock-lanes = <0>;
 				data-lanes = <1 2 3 4>;
@@ -246,9 +246,9 @@
 
 	ports {
 		port@0 {
-			csi1_ep1: endpoint@0 {
+			mipi_in_cam: endpoint@0 {
 				reg = <0>;
-				remote-endpoint = <&csi1_out>;
+				remote-endpoint = <&cam_out>;
 				data-lanes = <1 2 3 4>;
 			};
 		};
