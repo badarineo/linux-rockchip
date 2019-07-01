@@ -964,7 +964,10 @@ static int rkisp1_isp_sd_s_stream(struct v4l2_subdev *sd, int on)
 		ret = rkisp1_isp_stop(isp_dev);
 		if (ret < 0)
 			return ret;
+
 		mipi_csi2_s_stream_stop(isp_dev->active_sensor);
+
+		return 0;
 	}
 
 	sensor_sd = get_remote_sensor(sd);
