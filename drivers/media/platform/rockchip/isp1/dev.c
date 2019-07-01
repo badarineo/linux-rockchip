@@ -291,7 +291,8 @@ static int subdev_notifier_bound(struct v4l2_async_notifier *notifier,
 	sensor->sd = sd;
 	sensor->dphy = devm_phy_get(isp_dev->dev, "dphy");
 	if (IS_ERR(sensor->dphy)) {
-		dev_err(isp_dev->dev, "Couldn't get the MIPI D-PHY\n");
+		if (PTR_ERR(sensor->dphy) != -EPROBE_DEFER)
+			dev_err(isp_dev->dev, "Couldn't get the MIPI D-PHY\n");
 		return PTR_ERR(sensor->dphy);
 	}
 	phy_init(sensor->dphy);
